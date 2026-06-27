@@ -84,6 +84,8 @@
     .chip.queued { background: #e7f0fa; color: #28527a; }
     .chip.posted { background: #e8f5e9; color: #2e7d32; }
     .chip:hover { border-color: var(--accent); }
+    .chip[draggable="true"] { cursor: grab; }
+    .cal-cell.drop-hover { background: #eef6ff; outline: 2px dashed var(--accent); outline-offset: -2px; }
     .detail-img { width: 100%; border-radius: 8px; margin: 4px 0 12px; background: #f2f2f2; }
     .detail-row { font-size: 13px; margin: 6px 0; color: #444; }
     .detail-row b { color: #222; }
@@ -220,6 +222,7 @@
     <div class="cal-legend">
       <span class="dot queued"></span>Queued (waiting to post)
       <span class="dot posted"></span>Already posted
+      <div style="margin-top:6px;color:#999">Tip: drag a queued post to another day to reschedule it (time stays the same). Or click it to edit date and time.</div>
     </div>
     <div class="cal-status" id="calStatus"></div>
     <div class="cal-grid" id="calGrid"></div>
@@ -368,7 +371,7 @@
       showMsg("Saving…", "ok");
       try {
         const imgB64 = await readFileB64(file);
-        const base = `${date}-${slug(stem)}`;
+        const base = slug(stem);   // folder = photo name (no date prefix; the calendar is the schedule view)
         let folder = null, lastErr = "";
         for (const suf of ["", "-2", "-3", "-4", "-5"]) {
           const cand = `queue/${base}${suf}`;
@@ -585,10 +588,12 @@
           try {
             const cr = await ghGet("contents/" + y.path.split("/").map(encodeURIComponent).join("/"), true);
             if (!cr.ok) return null;
-            const p = parsePost(await cr.text());
+            const text = await cr.text();
+            const p = parsePost(text);
             const folder = y.path.split("/").slice(0, 2).join("/");
             return { folder, status: y.path.startsWith("queue/") ? "queued" : "posted",
-                     imagePath: imgByFolder[folder] || null, ...p };
+                     imagePath: imgByFolder[folder] || null,
+                     yamlPath: y.path, yamlSha: y.sha, yamlText: text, ...p };
           } catch (e) { return null; }
         }));
         const parsed = out.filter(Boolean);
@@ -621,6 +626,10 @@
         const cell = document.createElement("div");
         cell.className = "cal-cell" + (d.getMonth() !== calMonth ? " other" : "")
           + (d.toDateString() === now.toDateString() ? " today" : "");
+        cell.dataset.date = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+        cell.ondragover = (e) => { e.preventDefault(); cell.classList.add("drop-hover"); };
+        cell.ondragleave = () => cell.classList.remove("drop-hover");
+        cell.ondrop = (e) => { e.preventDefault(); handleDrop(cell); };
         const num = document.createElement("div"); num.className = "cal-daynum"; num.textContent = d.getDate();
         cell.appendChild(num);
         const k = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
@@ -633,10 +642,69 @@
           chip.textContent = t + " " + photoName;
           chip.title = photoName + (p.caption ? " — " + p.caption : "");
           chip.onclick = () => openDetail(idx);
+          if (p.status === "queued") {
+            chip.draggable = true;
+            chip.ondragstart = (e) => { dragIdx = idx; e.dataTransfer.effectAllowed = "move"; };
+          }
           cell.appendChild(chip);
         });
         grid.appendChild(cell);
       }
+    }
+
+    let dragIdx = null;
+    function fmtSched(d) {
+      const p = n => ("0" + n).slice(-2);
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    async function putUpdate(path, sha, contentB64, message) {
+      const owner = LS.getItem("gh_owner") || "jonyag";
+      const repo = LS.getItem("gh_repo") || "social-autopost";
+      return fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+        method: "PUT",
+        headers: {
+          "Authorization": "Bearer " + LS.getItem("gh_token"),
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({ message, content: contentB64, sha }),
+      });
+    }
+
+    // Rewrite a queued post's schedule: line and commit it.
+    async function updateSchedule(idx, newDate) {
+      const p = scheduleData[idx];
+      if (!p || p.status !== "queued") return;
+      const name = p.folder.split("/")[1];
+      const newSched = fmtSched(newDate);
+      setCalStatus(`Moving ${name} → ${newSched} …`);
+      try {
+        let text = p.yamlText || "";
+        if (/^schedule:.*$/m.test(text)) text = text.replace(/^schedule:.*$/m, `schedule: "${newSched}"`);
+        else text = text.replace(/\s*$/, "") + `\nschedule: "${newSched}"\n`;
+        const r = await putUpdate(p.yamlPath.split("/").map(encodeURIComponent).join("/"),
+                                  p.yamlSha, utf8b64(text), `Reschedule ${name} to ${newSched}`);
+        if (r.status === 409) throw new Error("This post changed on GitHub — hit Refresh and try again.");
+        if (!r.ok) throw new Error("GitHub " + r.status + ": " + (await r.text()).slice(0, 150));
+        const j = await r.json();
+        p.yamlText = text; p.schedStr = newSched; p.date = newDate;
+        if (j.content && j.content.sha) p.yamlSha = j.content.sha;
+        renderMonth();
+        setCalStatus(`✓ ${name} moved to ${newSched}`);
+      } catch (err) { setCalStatus("✗ " + err.message); }
+    }
+
+    function handleDrop(cell) {
+      cell.classList.remove("drop-hover");
+      if (dragIdx === null) return;
+      const idx = dragIdx; dragIdx = null;
+      const p = scheduleData[idx];
+      if (!p) return;
+      const a = cell.dataset.date.split("-").map(Number);
+      const nd = new Date(a[0], a[1], a[2], p.date.getHours(), p.date.getMinutes());  // keep time
+      if (nd.toDateString() === p.date.toDateString()) return;  // dropped on same day
+      updateSchedule(idx, nd);
     }
 
     async function openDetail(idx) {
@@ -644,12 +712,33 @@
       const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
       const photoName = p.folder.split("/")[1].replace(/^\d{4}-\d{2}-\d{2}-/, "");
       $("pdTitle").textContent = p.status === "queued" ? "🕓 Queued" : "✅ Posted";
-      $("pdBody").innerHTML =
+      let html =
         `<div class="detail-row"><b>Photo:</b> ${esc(photoName)}</div>` +
         `<div class="detail-row"><b>When:</b> ${esc(p.schedStr)} (Pacific)</div>` +
         `<div class="detail-row"><b>To:</b> ${esc((p.platforms || []).join(", ")) || "—"}</div>` +
         `<div class="detail-row"><b>Caption:</b> ${esc(p.caption) || "—"}</div>` +
         `<div class="detail-row" style="color:#999"><b>Folder:</b> ${esc(p.folder)}</div>`;
+      if (p.status === "queued") {
+        html +=
+          `<div class="detail-row" style="margin-top:14px"><b>Edit date and time</b></div>` +
+          `<div class="row"><div><input type="date" id="pdDate"></div><div><input type="time" id="pdTime"></div></div>` +
+          `<button class="primary" style="float:none;width:100%;margin-top:10px" id="pdSave">Save new date / time</button>` +
+          `<div class="hint" id="pdMsg" style="margin-top:8px"></div>`;
+      }
+      $("pdBody").innerHTML = html;
+      if (p.status === "queued") {
+        const pad = n => ("0" + n).slice(-2);
+        $("pdDate").value = `${p.date.getFullYear()}-${pad(p.date.getMonth() + 1)}-${pad(p.date.getDate())}`;
+        $("pdTime").value = `${pad(p.date.getHours())}:${pad(p.date.getMinutes())}`;
+        $("pdSave").onclick = async () => {
+          const dv = $("pdDate").value, tv = $("pdTime").value;
+          if (!dv || !tv) { $("pdMsg").textContent = "Pick a date and a time."; return; }
+          const da = dv.split("-").map(Number), ta = tv.split(":").map(Number);
+          $("pdSave").disabled = true; $("pdMsg").textContent = "Saving…";
+          await updateSchedule(idx, new Date(da[0], da[1] - 1, da[2], ta[0], ta[1]));
+          $("postDetail").classList.add("hidden");
+        };
+      }
       const img = $("pdImg");
       img.style.display = "none"; img.removeAttribute("src");
       $("postDetail").classList.remove("hidden");
