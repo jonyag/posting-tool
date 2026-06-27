@@ -61,6 +61,38 @@
       font-size: 14px; display: none; white-space: pre-wrap; }
     .msg.ok { display: block; background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
     .msg.err { display: block; background: #fdecea; color: #c0392b; border: 1px solid #f5c6cb; }
+    /* Calendar view */
+    .calview { position: fixed; inset: 0; background: #fff; z-index: 6; overflow-y: auto; padding: 20px 24px 40px; }
+    .cal-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .cal-title { font-weight: 700; font-size: 18px; color: var(--accent); margin-right: auto; }
+    .cal-btn { background: #eef2f6; color: var(--accent); border: 1px solid var(--line); border-radius: 7px;
+      padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .cal-btn:hover { background: #e2e9f0; }
+    .cal-legend { font-size: 12px; color: #666; margin-bottom: 8px; }
+    .cal-status { color: #888; font-size: 13px; margin-bottom: 12px; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin: 0 4px 0 14px; }
+    .dot.queued { background: #cfe0f3; } .dot.posted { background: #c8e6c9; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .cal-dow { font-size: 12px; font-weight: 600; color: #999; text-align: center; padding: 4px 0; }
+    .cal-cell { min-height: 92px; border: 1px solid #eee; border-radius: 6px; padding: 4px 5px; overflow: hidden; }
+    .cal-cell.other { background: #fafafa; }
+    .cal-cell.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .cal-daynum { font-size: 11px; font-weight: 600; color: #999; }
+    .cal-cell.other .cal-daynum { color: #ccc; }
+    .chip { display: block; margin-top: 3px; padding: 2px 5px; border-radius: 4px; font-size: 11px; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid transparent; }
+    .chip.queued { background: #e7f0fa; color: #28527a; }
+    .chip.posted { background: #e8f5e9; color: #2e7d32; }
+    .chip:hover { border-color: var(--accent); }
+    .detail-img { width: 100%; border-radius: 8px; margin: 4px 0 12px; background: #f2f2f2; }
+    .detail-row { font-size: 13px; margin: 6px 0; color: #444; }
+    .detail-row b { color: #222; }
+    @media (max-width: 560px) {
+      .calview { padding: 16px 12px 36px; }
+      .cal-cell { min-height: 62px; padding: 3px; }
+      .chip { font-size: 10px; padding: 1px 3px; }
+      .cal-dow { font-size: 10px; }
+    }
     /* Settings + PIN overlays */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35);
       display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
@@ -132,7 +164,10 @@
     <div class="banner"><img src="logo.png" alt="Jon Yager Photography"></div>
     <div class="subtitle">
       <span>Posting Tool</span>
-      <button type="button" class="gear" title="Settings" onclick="openSettings()">&#9881;</button>
+      <span style="display:flex;gap:12px;align-items:center">
+        <button type="button" class="suggest-btn" title="See what's scheduled and posted" onclick="openCalendar()">📅 Calendar</button>
+        <button type="button" class="gear" title="Settings" onclick="openSettings()">&#9881;</button>
+      </span>
     </div>
 
     <label for="photo">Photo</label>
@@ -171,6 +206,35 @@
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
   </form>
+
+  <!-- Calendar / schedule view -->
+  <div class="calview hidden" id="calendarView">
+    <div class="cal-head">
+      <span class="cal-title" id="calTitle">Calendar</span>
+      <button class="cal-btn" onclick="calPrev()" title="Previous month">‹</button>
+      <button class="cal-btn" onclick="calToday()">Today</button>
+      <button class="cal-btn" onclick="calNext()" title="Next month">›</button>
+      <button class="cal-btn" onclick="loadSchedule().then(renderMonth)">↻ Refresh</button>
+      <button class="cal-btn" onclick="closeCalendar()">✕ Close</button>
+    </div>
+    <div class="cal-legend">
+      <span class="dot queued"></span>Queued (waiting to post)
+      <span class="dot posted"></span>Already posted
+    </div>
+    <div class="cal-status" id="calStatus"></div>
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+
+  <!-- Post detail -->
+  <div class="overlay hidden" id="postDetail">
+    <div class="panel">
+      <h2 id="pdTitle">Post</h2>
+      <img class="detail-img" id="pdImg" alt="" style="display:none">
+      <div id="pdBody"></div>
+      <button class="primary" style="float:none;width:100%;margin-top:14px"
+              onclick="document.getElementById('postDetail').classList.add('hidden')">Close</button>
+    </div>
+  </div>
 
   <script>
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
@@ -430,6 +494,171 @@
       $("caption").value = $("sgText").textContent;
       $("suggestion").classList.remove("show");
       $("caption").focus();
+    }
+
+    // ---------- calendar / schedule view ----------
+    let calYear = null, calMonth = null, scheduleData = [];
+
+    function ghGet(path, raw) {
+      const owner = LS.getItem("gh_owner") || "jonyag";
+      const repo = LS.getItem("gh_repo") || "social-autopost";
+      const url = `https://api.github.com/repos/${owner}/${repo}` + (path ? "/" + path : "");
+      return fetch(url, {
+        headers: {
+          "Authorization": "Bearer " + LS.getItem("gh_token"),
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Accept": raw ? "application/vnd.github.raw" : "application/vnd.github+json",
+        },
+      });
+    }
+    function setCalStatus(t) { $("calStatus").textContent = t; }
+
+    async function openCalendar() {
+      if (!LS.getItem("gh_token")) { showMsg("Add your GitHub token in Settings first.", "err"); openSettings(); return; }
+      $("calendarView").classList.remove("hidden");
+      if (calYear === null) { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); }
+      await loadSchedule();
+      renderMonth();
+    }
+    function closeCalendar() { $("calendarView").classList.add("hidden"); }
+    function calPrev() { if (--calMonth < 0) { calMonth = 11; calYear--; } renderMonth(); }
+    function calNext() { if (++calMonth > 11) { calMonth = 0; calYear++; } renderMonth(); }
+    function calToday() { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); renderMonth(); }
+
+    async function getBranch() {
+      try { const r = await ghGet(""); if (r.ok) return (await r.json()).default_branch || "main"; } catch (e) {}
+      return "main";
+    }
+
+    // Tolerant parse of the few post.yaml shapes this tool (and the old desktop app) wrote.
+    function parsePost(text) {
+      const lines = text.split(/\r?\n/);
+      let schedStr = "", date = null;
+      const sm = text.match(/^schedule:\s*["']?([^"'\n]+?)["']?\s*$/m);
+      if (sm) {
+        schedStr = sm[1].trim();
+        const d = schedStr.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+        if (d) date = new Date(+d[1], +d[2] - 1, +d[3], +d[4], +d[5]);
+      }
+      let caption = "";
+      const ci = lines.findIndex(l => /^caption:/.test(l));
+      if (ci >= 0) {
+        const parts = [lines[ci].replace(/^caption:\s*/, "")];
+        for (let j = ci + 1; j < lines.length; j++) {
+          if (/^[a-zA-Z_]+:/.test(lines[j])) break;
+          parts.push(lines[j]);
+        }
+        caption = parts.join(" ").replace(/^[|>]\s*/, "").trim();
+        if (/^".*"$/.test(caption)) { try { caption = JSON.parse(caption); } catch (e) { caption = caption.slice(1, -1); } }
+        caption = caption.replace(/\s+/g, " ").trim();
+      }
+      let platforms = [];
+      const pm = text.match(/^platforms:\s*\[([^\]]*)\]/m);
+      if (pm) {
+        platforms = pm[1].split(",").map(s => s.replace(/["'\s]/g, "")).filter(Boolean);
+      } else {
+        const pi = lines.findIndex(l => /^platforms:\s*$/.test(l));
+        if (pi >= 0) for (let j = pi + 1; j < lines.length; j++) {
+          const m = lines[j].match(/^\s*-\s*(.+?)\s*$/);
+          if (!m) break;
+          platforms.push(m[1].replace(/["']/g, ""));
+        }
+      }
+      return { schedStr, date, caption, platforms };
+    }
+
+    async function loadSchedule() {
+      setCalStatus("Loading…");
+      scheduleData = [];
+      try {
+        const branch = await getBranch();
+        const r = await ghGet(`git/trees/${branch}?recursive=1`);
+        if (r.status === 409) { setCalStatus("Repo looks empty — nothing scheduled yet."); return; }
+        if (!r.ok) throw new Error("Couldn't read the repo (" + r.status + ").");
+        const tree = (await r.json()).tree || [];
+        const yamls = tree.filter(t => t.type === "blob" && /^(queue|posted)\/[^/]+\/post\.ya?ml$/.test(t.path));
+        const imgs = tree.filter(t => t.type === "blob" && /^(queue|posted)\/[^/]+\/[^/]+\.(jpe?g|png|gif|webp)$/i.test(t.path));
+        const imgByFolder = {};
+        for (const im of imgs) imgByFolder[im.path.split("/").slice(0, 2).join("/")] = im.path;
+
+        const out = await Promise.all(yamls.map(async y => {
+          try {
+            const cr = await ghGet("contents/" + y.path.split("/").map(encodeURIComponent).join("/"), true);
+            if (!cr.ok) return null;
+            const p = parsePost(await cr.text());
+            const folder = y.path.split("/").slice(0, 2).join("/");
+            return { folder, status: y.path.startsWith("queue/") ? "queued" : "posted",
+                     imagePath: imgByFolder[folder] || null, ...p };
+          } catch (e) { return null; }
+        }));
+        const parsed = out.filter(Boolean);
+        scheduleData = parsed.filter(p => p.date);
+        const q = scheduleData.filter(p => p.status === "queued").length;
+        setCalStatus(`${q} queued · ${scheduleData.length - q} posted`
+          + (scheduleData.length < parsed.length ? " · (some posts have no date and aren't shown)" : ""));
+      } catch (err) { setCalStatus("✗ " + err.message); }
+    }
+
+    function renderMonth() {
+      const MONTHS = ["January","February","March","April","May","June","July",
+        "August","September","October","November","December"];
+      $("calTitle").textContent = MONTHS[calMonth] + " " + calYear;
+      const grid = $("calGrid");
+      grid.innerHTML = "";
+      ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].forEach(d => {
+        const h = document.createElement("div"); h.className = "cal-dow"; h.textContent = d; grid.appendChild(h);
+      });
+      const byDay = {};
+      scheduleData.forEach((p, i) => {
+        const k = p.date.getFullYear() + "-" + p.date.getMonth() + "-" + p.date.getDate();
+        (byDay[k] = byDay[k] || []).push(i);
+      });
+      const first = new Date(calYear, calMonth, 1);
+      const start = new Date(calYear, calMonth, 1 - first.getDay());
+      const now = new Date();
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+        const cell = document.createElement("div");
+        cell.className = "cal-cell" + (d.getMonth() !== calMonth ? " other" : "")
+          + (d.toDateString() === now.toDateString() ? " today" : "");
+        const num = document.createElement("div"); num.className = "cal-daynum"; num.textContent = d.getDate();
+        cell.appendChild(num);
+        const k = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+        (byDay[k] || []).sort((a, b) => scheduleData[a].date - scheduleData[b].date).forEach(idx => {
+          const p = scheduleData[idx];
+          const chip = document.createElement("div");
+          chip.className = "chip " + p.status;
+          const t = ("0" + p.date.getHours()).slice(-2) + ":" + ("0" + p.date.getMinutes()).slice(-2);
+          const photoName = p.folder.split("/")[1].replace(/^\d{4}-\d{2}-\d{2}-/, "");
+          chip.textContent = t + " " + photoName;
+          chip.title = photoName + (p.caption ? " — " + p.caption : "");
+          chip.onclick = () => openDetail(idx);
+          cell.appendChild(chip);
+        });
+        grid.appendChild(cell);
+      }
+    }
+
+    async function openDetail(idx) {
+      const p = scheduleData[idx];
+      const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const photoName = p.folder.split("/")[1].replace(/^\d{4}-\d{2}-\d{2}-/, "");
+      $("pdTitle").textContent = p.status === "queued" ? "🕓 Queued" : "✅ Posted";
+      $("pdBody").innerHTML =
+        `<div class="detail-row"><b>Photo:</b> ${esc(photoName)}</div>` +
+        `<div class="detail-row"><b>When:</b> ${esc(p.schedStr)} (Pacific)</div>` +
+        `<div class="detail-row"><b>To:</b> ${esc((p.platforms || []).join(", ")) || "—"}</div>` +
+        `<div class="detail-row"><b>Caption:</b> ${esc(p.caption) || "—"}</div>` +
+        `<div class="detail-row" style="color:#999"><b>Folder:</b> ${esc(p.folder)}</div>`;
+      const img = $("pdImg");
+      img.style.display = "none"; img.removeAttribute("src");
+      $("postDetail").classList.remove("hidden");
+      if (p.imagePath) {
+        try {
+          const ir = await ghGet("contents/" + p.imagePath.split("/").map(encodeURIComponent).join("/"), true);
+          if (ir.ok) { img.src = URL.createObjectURL(await ir.blob()); img.style.display = "block"; }
+        } catch (e) {}
+      }
     }
 
     // ---------- init ----------
