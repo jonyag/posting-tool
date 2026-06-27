@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#3E5C76">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>Jon Yager Photography — Posting Tool</title>
+  <style>
+    :root { --accent: #3E5C76; --line: #d9d9d9; --bg: #eef0f2; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #fff;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: #222; display: flex; justify-content: center;
+    }
+    .card {
+      background: #fff; width: 100%; max-width: 720px; min-height: 100vh;
+      padding: 28px 36px 44px; position: relative;
+    }
+    .banner { border: 1px solid var(--line); border-radius: 10px; padding: 16px;
+      text-align: center; margin-bottom: 6px; }
+    .banner img { max-width: 280px; max-height: 130px; }
+    .subtitle { color: var(--accent); font-weight: 700; font-size: 18px;
+      margin: 4px 0 18px; display: flex; align-items: center; justify-content: space-between; }
+    .gear { background: none; border: 0; font-size: 20px; cursor: pointer; color: #888;
+      padding: 0; float: none; margin: 0; }
+    .gear:hover { color: var(--accent); }
+    label { display: block; font-weight: 600; margin: 14px 0 6px; }
+    input[type=text], input[type=password], textarea, input[type=date], input[type=time] {
+      width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+    textarea { min-height: 185px; resize: vertical; }
+    .hint { color: #888; font-size: 13px; margin-top: 4px; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 140px; }
+    .platforms { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
+    .platforms label { font-weight: 500; margin: 0; display: flex; align-items: center; gap: 6px; }
+    button.primary {
+      margin-top: 22px; background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+      padding: 12px 22px; font-size: 15px; font-weight: 600; cursor: pointer; float: right; }
+    button.primary:hover { background: #324c63; }
+    button.primary:disabled { background: #9aa7b3; cursor: default; }
+    .msg { clear: both; margin-top: 26px; padding: 12px 14px; border-radius: 8px;
+      font-size: 14px; display: none; white-space: pre-wrap; }
+    .msg.ok { display: block; background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+    .msg.err { display: block; background: #fdecea; color: #c0392b; border: 1px solid #f5c6cb; }
+    /* Settings + PIN overlays */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35);
+      display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
+    .panel { background: #fff; border-radius: 12px; padding: 24px 26px; width: 100%;
+      max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+    .panel h2 { margin: 0 0 6px; font-size: 18px; }
+    .panel p { color: #666; font-size: 13px; margin: 0 0 14px; }
+    .hidden { display: none !important; }
+    /* Tighter padding on narrow screens (phones) */
+    @media (max-width: 560px) {
+      .card { padding: 22px 18px 36px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- PIN lock -->
+  <div class="overlay" id="lock">
+    <div class="panel">
+      <h2 id="lockTitle">Enter PIN</h2>
+      <p id="lockMsg">Enter your PIN to unlock the Posting Tool.</p>
+      <input type="password" id="pinInput" inputmode="numeric" autocomplete="off"
+             placeholder="PIN" onkeydown="if(event.key==='Enter')submitPin()">
+      <button class="primary" style="float:none;width:100%;margin-top:16px" onclick="submitPin()">
+        Unlock
+      </button>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="overlay hidden" id="settings">
+    <div class="panel">
+      <h2>Settings</h2>
+      <p>Your GitHub token lets this app save posts. It's stored only in this browser,
+         on this device. Leave repo as-is unless you renamed it.</p>
+      <label for="setOwner">GitHub owner</label>
+      <input type="text" id="setOwner" placeholder="jonyag">
+      <label for="setRepo">Repository</label>
+      <input type="text" id="setRepo" placeholder="social-autopost">
+      <label for="setToken">GitHub token</label>
+      <input type="password" id="setToken" placeholder="github_pat_…" autocomplete="off">
+      <div class="hint" id="tokenState"></div>
+      <button class="primary" style="float:none;width:100%;margin-top:16px" onclick="saveSettings()">
+        Save
+      </button>
+      <button class="gear" style="display:block;margin:12px auto 0;font-size:13px"
+              onclick="document.getElementById('settings').classList.add('hidden')">Close</button>
+    </div>
+  </div>
+
+  <!-- Main form -->
+  <form class="card" id="app" onsubmit="addToQueue(event)">
+    <div class="banner"><img src="logo.png" alt="Jon Yager Photography"></div>
+    <div class="subtitle">
+      <span>Posting Tool</span>
+      <button type="button" class="gear" title="Settings" onclick="openSettings()">&#9881;</button>
+    </div>
+
+    <label for="photo">Photo</label>
+    <input type="file" id="photo" accept="image/*">
+
+    <label for="caption">Caption</label>
+    <textarea id="caption" placeholder="Write your caption here…"></textarea>
+
+    <label for="tags">Hashtags</label>
+    <input type="text" id="tags" placeholder="#sunset #photography #bayarea">
+
+    <label>Post to</label>
+    <div class="platforms">
+      <label><input type="checkbox" value="facebook"> Facebook</label>
+      <label><input type="checkbox" value="instagram"> Instagram</label>
+      <label><input type="checkbox" value="bluesky"> Bluesky</label>
+      <label><input type="checkbox" value="mastodon"> Mastodon</label>
+    </div>
+
+    <div class="row">
+      <div><label for="date">Date</label><input type="date" id="date"></div>
+      <div><label for="time">Time</label><input type="time" id="time" value="12:00"></div>
+    </div>
+
+    <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
+    <div class="msg" id="msg"></div>
+  </form>
+
+  <script>
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+
+    // ---------- helpers ----------
+    const $ = (id) => document.getElementById(id);
+    const LS = localStorage;
+    async function sha256(t) {
+      const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+      return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
+    }
+    function slug(s) {
+      return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "").slice(0, 40) || "post";
+    }
+    function utf8b64(s) { return btoa(unescape(encodeURIComponent(s))); }
+
+    // ---------- PIN lock ----------
+    async function submitPin() {
+      const v = $("pinInput").value.trim();
+      if (!v) return;
+      const stored = LS.getItem("pin_hash");
+      if (!stored) {                       // first run → set this PIN
+        LS.setItem("pin_hash", await sha256(v));
+        unlock();
+      } else if (await sha256(v) === stored) {
+        unlock();
+      } else {
+        $("lockMsg").textContent = "Incorrect PIN. Try again.";
+        $("pinInput").value = "";
+      }
+    }
+    function unlock() {
+      $("lock").classList.add("hidden");
+      refreshTokenState();
+      if (!LS.getItem("gh_token")) openSettings();   // nudge first-time setup
+    }
+    function initLock() {
+      if (LS.getItem("pin_hash")) {
+        $("lockTitle").textContent = "Enter PIN";
+        $("lockMsg").textContent = "Enter your PIN to unlock the Posting Tool.";
+      } else {
+        $("lockTitle").textContent = "Create a PIN";
+        $("lockMsg").textContent = "Pick a PIN you'll remember. You'll enter it each time you open the app.";
+      }
+      $("pinInput").focus();
+    }
+
+    // ---------- settings ----------
+    function openSettings() {
+      $("setOwner").value = LS.getItem("gh_owner") || "jonyag";
+      $("setRepo").value = LS.getItem("gh_repo") || "social-autopost";
+      $("setToken").value = LS.getItem("gh_token") || "";
+      $("settings").classList.remove("hidden");
+    }
+    function saveSettings() {
+      LS.setItem("gh_owner", $("setOwner").value.trim() || "jonyag");
+      LS.setItem("gh_repo", $("setRepo").value.trim() || "social-autopost");
+      LS.setItem("gh_token", $("setToken").value.trim());
+      $("settings").classList.add("hidden");
+      refreshTokenState();
+    }
+    function refreshTokenState() {
+      const has = !!LS.getItem("gh_token");
+      $("submitBtn").disabled = !has;
+      $("tokenState").textContent = has ? "Token saved." : "No token set yet.";
+      if (!has) showMsg("Open Settings (gear icon) and paste your GitHub token to enable posting.", "err");
+    }
+
+    // ---------- post to GitHub ----------
+    function showMsg(text, kind) { const m = $("msg"); m.textContent = text; m.className = "msg " + kind; }
+
+    function readFileB64(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);   // strip data: prefix
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+    }
+
+    async function putFile(owner, repo, token, path, contentB64, message) {
+      const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+      return fetch(url, {
+        method: "PUT",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({ message, content: contentB64 }),
+      });
+    }
+
+    async function addToQueue(e) {
+      e.preventDefault();
+      const token = LS.getItem("gh_token");
+      const owner = LS.getItem("gh_owner") || "jonyag";
+      const repo = LS.getItem("gh_repo") || "social-autopost";
+      if (!token) { openSettings(); return; }
+
+      const file = $("photo").files[0];
+      if (!file) { showMsg("Please choose a photo first.", "err"); return; }
+      const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
+      if (!chosen.length) { showMsg("Pick at least one platform.", "err"); return; }
+      const date = $("date").value, time = $("time").value;
+      if (!date || !time) { showMsg("Please set a date and time.", "err"); return; }
+      const sched = `${date} ${time}`;
+
+      const caption = $("caption").value.trim();
+      const tags = $("tags").value.trim().split(/\s+/).filter(Boolean)
+        .map(t => "#" + t.replace(/^#+/, ""));
+      const stem = file.name.replace(/\.[^.]+$/, "");
+      let ext = (file.name.match(/\.([^.]+)$/) || [, "jpg"])[1].toLowerCase();
+
+      // Build post.yaml (schedule kept as a quoted string)
+      const yaml =
+        `caption: ${JSON.stringify(caption)}\n` +
+        `hashtags: [${tags.map(t => JSON.stringify(t)).join(", ")}]\n` +
+        `platforms: [${chosen.map(p => JSON.stringify(p)).join(", ")}]\n` +
+        `type: feed\n` +
+        `schedule: "${sched}"\n`;
+
+      $("submitBtn").disabled = true;
+      showMsg("Saving…", "ok");
+      try {
+        const imgB64 = await readFileB64(file);
+        const base = `${date}-${slug(stem)}`;
+        let folder = null, lastErr = "";
+        for (const suf of ["", "-2", "-3", "-4", "-5"]) {
+          const cand = `queue/${base}${suf}`;
+          const r = await putFile(owner, repo, token, `${cand}/post.yaml`, utf8b64(yaml),
+                                  `Add post ${base}${suf}`);
+          if (r.ok) { folder = cand; break; }
+          if (r.status === 401) throw new Error("Token rejected (401). Check it in Settings.");
+          if (r.status === 404) throw new Error("Repo not found (404). Check owner/repo in Settings.");
+          if (r.status === 422 || r.status === 409) { lastErr = "name taken"; continue; }
+          throw new Error("GitHub error " + r.status + ": " + (await r.text()).slice(0, 200));
+        }
+        if (!folder) throw new Error("Couldn't create a unique folder. " + lastErr);
+        const ri = await putFile(owner, repo, token, `${folder}/image.${ext}`, imgB64,
+                                 `Add image for ${folder}`);
+        if (!ri.ok) throw new Error("Photo upload failed " + ri.status + ": " + (await ri.text()).slice(0, 200));
+
+        showMsg(`✓ Queued! Posts ${sched} Pacific to ${chosen.join(", ")}.\n` +
+                `Saved to ${folder}. It will post automatically — no other step needed.`, "ok");
+        $("photo").value = ""; $("caption").value = ""; $("tags").value = "";
+        document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
+      } catch (err) {
+        showMsg("✗ " + err.message, "err");
+      } finally {
+        $("submitBtn").disabled = !LS.getItem("gh_token");
+      }
+    }
+
+    // ---------- init ----------
+    (function () {
+      const now = new Date(), pad = n => String(n).padStart(2, "0");
+      $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      initLock();
+    })();
+
+    // Right-size the installed app window on a big monitor (best effort)
+    window.addEventListener("load", () => {
+      try {
+        if (matchMedia("(display-mode: standalone)").matches) {
+          const w = 860, h = Math.min(screen.availHeight - 100, 1040);
+          if (window.outerWidth > w + 120 || window.outerHeight > h + 120) {
+            window.resizeTo(w, h);
+            window.moveTo(Math.max(0, (screen.availWidth - w) / 2), 40);
+          }
+        }
+      } catch (e) {}
+    });
+  </script>
+</body>
+</html>
