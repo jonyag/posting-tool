@@ -48,6 +48,10 @@
       padding: 7px 13px; cursor: pointer; border: 1px solid var(--line); }
     .sg-use { background: var(--accent); color: #fff; border-color: var(--accent); }
     .sg-again { background: #fff; color: #555; }
+    .hash-chip { display: inline-block; margin: 4px 6px 0 0; padding: 4px 10px; border-radius: 14px;
+      border: 1px solid var(--line); background: #fff; color: var(--accent); font-size: 13px; cursor: pointer; }
+    .hash-chip:hover { border-color: var(--accent); }
+    .hash-chip.added { background: var(--accent); color: #fff; border-color: var(--accent); }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > div { flex: 1; min-width: 140px; }
     .platforms { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
@@ -152,6 +156,9 @@
       <textarea id="setVoice" style="min-height:120px"
         placeholder="Paste several of your past captions here (separate them with a blank line). The more you add, the more it sounds like you."></textarea>
       <div class="hint">Used as examples so suggestions match your style.</div>
+      <label for="setNiche">Your niche &amp; location</label>
+      <input type="text" id="setNiche" placeholder="e.g. fine-art bird & coastal photography, Northern California">
+      <div class="hint">Helps caption and hashtag suggestions stay relevant and local.</div>
 
       <button class="primary" style="float:none;width:100%;margin-top:18px" onclick="saveSettings()">
         Save
@@ -174,7 +181,7 @@
 
     <label for="photo">Photo</label>
     <input type="file" id="photo" accept="image/*"
-           onchange="document.getElementById('suggestion').classList.remove('show')">
+           onchange="document.getElementById('suggestion').classList.remove('show');document.getElementById('hashSug').classList.remove('show')">
 
     <div class="caption-head">
       <label for="caption" style="margin-bottom:0">Caption</label>
@@ -189,8 +196,15 @@
       </div>
     </div>
 
-    <label for="tags">Hashtags</label>
+    <div class="caption-head">
+      <label for="tags" style="margin-bottom:0">Hashtags</label>
+      <button type="button" class="suggest-btn" id="hashBtn" onclick="suggestHashtags()"># Suggest hashtags</button>
+    </div>
     <input type="text" id="tags" placeholder="#sunset #photography #bayarea">
+    <div class="suggestion" id="hashSug">
+      <div style="font-size:12px;color:#666;margin-bottom:6px">Tap to add or remove. Aimed at mid-size tags — not the giant ones where posts get buried, not dead ones nobody sees.</div>
+      <div id="hashChips"></div>
+    </div>
 
     <label>Post to</label>
     <div class="platforms">
@@ -294,6 +308,7 @@
       $("setAiKey").value = LS.getItem("anthropic_key") || "";
       $("setAiModel").value = LS.getItem("ai_model") || "claude-opus-4-8";
       $("setVoice").value = LS.getItem("voice_samples") || "";
+      $("setNiche").value = LS.getItem("niche") || "";
       $("settings").classList.remove("hidden");
     }
     function saveSettings() {
@@ -303,6 +318,7 @@
       LS.setItem("anthropic_key", $("setAiKey").value.trim());
       LS.setItem("ai_model", $("setAiModel").value || "claude-opus-4-8");
       LS.setItem("voice_samples", $("setVoice").value.trim());
+      LS.setItem("niche", $("setNiche").value.trim());
       $("settings").classList.add("hidden");
       refreshTokenState();
     }
@@ -392,6 +408,7 @@
                 `Saved to ${folder}. It will post automatically — no other step needed.`, "ok");
         $("photo").value = ""; $("caption").value = ""; $("tags").value = "";
         $("suggestion").classList.remove("show");
+        $("hashSug").classList.remove("show");
         document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
       } catch (err) {
         showMsg("✗ " + err.message, "err");
@@ -447,7 +464,9 @@
       showMsg("Writing a caption in your voice…", "ok");
       try {
         const b64 = await downscaleToB64(file);
-        const userText = (samples
+        const niche = (LS.getItem("niche") || "").trim();
+        const userText = (niche ? "My niche and location: " + niche + "\n\n" : "")
+          + (samples
             ? "Here are examples of my past captions so you can match my voice:\n\n" + samples + "\n\n"
             : "I haven't given example captions yet, so write plainly and naturally in a real photographer's voice.\n\n")
           + "Write one caption for this new photo in that same voice.";
@@ -497,6 +516,94 @@
       $("caption").value = $("sgText").textContent;
       $("suggestion").classList.remove("show");
       $("caption").focus();
+    }
+
+    // ---------- AI hashtag suggestion ----------
+    const HASHTAG_SYSTEM =
+      "You suggest Instagram hashtags for a fine-art photographer's photo. Look at the image and propose tags that maximize real discoverability. " +
+      "Strategy (critical): do NOT suggest mega-saturated tags with hundreds of millions of posts (e.g. #photography, #nature, #love, #travel, #art, #beautiful, #instagood, #photooftheday) — a post drowns in them instantly. Also avoid dead tags almost nobody browses. " +
+      "Aim for the MIDDLE: mostly mid-sized niche tags (roughly tens of thousands to a few hundred thousand posts) where a strong photo can surface and stay visible. Add a few smaller, specific or local/community tags for engaged audiences, and at most one or two larger tags. " +
+      "Base every tag on what is actually in the photo: subject or species, genre, setting, light and mood, technique, and region if given. " +
+      "Return about 10 hashtags (no more than 12) — your strongest picks only — as ONE space-separated line, each starting with #, all lowercase, no spaces inside a tag, no numbering, no commentary — just the hashtags.";
+
+    // Shared Claude vision call (used by hashtags; caption has its own inline call).
+    async function claudeVision(system, userText, file, maxTokens) {
+      const model = LS.getItem("ai_model") || "claude-opus-4-8";
+      const b64 = await downscaleToB64(file);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": LS.getItem("anthropic_key"),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model, max_tokens: maxTokens, system,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+            { type: "text", text: userText },
+          ] }],
+        }),
+      });
+      if (!res.ok) {
+        let detail = ""; try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+        if (res.status === 401) throw new Error("Anthropic key rejected (401). Check it in Settings.");
+        if (res.status === 429) throw new Error("Rate limited (429). Wait a moment and try again.");
+        if (/credit|balance/i.test(detail)) throw new Error("Anthropic account is out of credit. Add credit at console.anthropic.com.");
+        throw new Error("Anthropic error " + res.status + (detail ? ": " + detail : ""));
+      }
+      const data = await res.json();
+      return (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+    }
+
+    async function suggestHashtags() {
+      if (!LS.getItem("anthropic_key")) {
+        showMsg("Add your Anthropic API key in Settings (gear ⚙) to use # Suggest hashtags.", "err");
+        openSettings(); return;
+      }
+      const file = $("photo").files[0];
+      if (!file) { showMsg("Choose a photo first, then I can suggest hashtags.", "err"); return; }
+      const niche = (LS.getItem("niche") || "").trim();
+      const btn = $("hashBtn"); const old = btn.textContent;
+      btn.disabled = true; btn.textContent = "# Thinking…";
+      showMsg("Finding good hashtags for this photo…", "ok");
+      try {
+        const userText = (niche ? "My niche and location: " + niche + "\n\n" : "") + "Suggest hashtags for this photo.";
+        const text = await claudeVision(HASHTAG_SYSTEM, userText, file, 500);
+        const tags = text.match(/#[A-Za-z0-9_]+/g) || [];
+        if (!tags.length) throw new Error("No hashtags came back — try again.");
+        renderHashChips(tags);
+        showMsg("Tap the hashtags you want to add or remove. Nothing posts until you click Add to Queue.", "ok");
+      } catch (err) { showMsg("✗ " + err.message, "err"); }
+      finally { btn.disabled = false; btn.textContent = old; }
+    }
+
+    function renderHashChips(tags) {
+      const box = $("hashChips"); box.innerHTML = "";
+      const current = $("tags").value.split(/\s+/).map(s => s.toLowerCase());
+      const seen = new Set();
+      tags.forEach(t => {
+        const tag = "#" + t.replace(/^#+/, "").toLowerCase();
+        if (seen.has(tag)) return; seen.add(tag);
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = "hash-chip" + (current.includes(tag) ? " added" : "");
+        el.textContent = tag;
+        el.onclick = () => toggleHashChip(tag, el);
+        box.appendChild(el);
+      });
+      $("hashSug").classList.add("show");
+    }
+
+    function toggleHashChip(tag, el) {
+      const input = $("tags");
+      const cur = input.value.split(/\s+/).filter(Boolean);
+      const norm = "#" + tag.replace(/^#+/, "");
+      const i = cur.findIndex(t => t.toLowerCase() === norm.toLowerCase());
+      if (i >= 0) { cur.splice(i, 1); el.classList.remove("added"); }
+      else { cur.push(norm); el.classList.add("added"); }
+      input.value = cur.join(" ");
     }
 
     // ---------- calendar / schedule view ----------
