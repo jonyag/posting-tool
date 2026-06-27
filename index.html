@@ -90,6 +90,10 @@
     .chip:hover { border-color: var(--accent); }
     .chip[draggable="true"] { cursor: grab; }
     .cal-cell.drop-hover { background: #eef6ff; outline: 2px dashed var(--accent); outline-offset: -2px; }
+    .cal-cell.pickable { cursor: pointer; }
+    .cal-cell.pickable:hover { background: #eef6ff; }
+    .cal-pick { background: #eef6ff; border: 1px solid #cfe0f3; color: #28527a; border-radius: 8px;
+      padding: 10px 12px; font-size: 13px; margin-bottom: 10px; }
     .detail-img { width: 100%; border-radius: 8px; margin: 4px 0 12px; background: #f2f2f2; }
     .detail-row { font-size: 13px; margin: 6px 0; color: #444; }
     .detail-row b { color: #222; }
@@ -218,6 +222,7 @@
       <div><label for="date">Date</label><input type="date" id="date"></div>
       <div><label for="time">Time</label><input type="time" id="time" value="12:00"></div>
     </div>
+    <button type="button" class="suggest-btn" style="margin-top:8px" onclick="openCalendar(true)">📅 Pick date on calendar</button>
 
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
@@ -233,6 +238,7 @@
       <button class="cal-btn" onclick="loadSchedule().then(renderMonth)">↻ Refresh</button>
       <button class="cal-btn" onclick="closeCalendar()">✕ Close</button>
     </div>
+    <div class="cal-pick hidden" id="calPickBanner">📌 Tap an open day to schedule your new post on it. (The time stays as set on the form.)</div>
     <div class="cal-legend">
       <span class="dot queued"></span>Queued (waiting to post)
       <span class="dot posted"></span>Already posted
@@ -607,7 +613,7 @@
     }
 
     // ---------- calendar / schedule view ----------
-    let calYear = null, calMonth = null, scheduleData = [];
+    let calYear = null, calMonth = null, scheduleData = [], calPickMode = false;
 
     function ghGet(path, raw) {
       const owner = LS.getItem("gh_owner") || "jonyag";
@@ -623,14 +629,22 @@
     }
     function setCalStatus(t) { $("calStatus").textContent = t; }
 
-    async function openCalendar() {
+    async function openCalendar(pick) {
       if (!LS.getItem("gh_token")) { showMsg("Add your GitHub token in Settings first.", "err"); openSettings(); return; }
+      calPickMode = !!pick;
+      $("calPickBanner").classList.toggle("hidden", !calPickMode);
       $("calendarView").classList.remove("hidden");
       if (calYear === null) { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); }
       await loadSchedule();
       renderMonth();
     }
-    function closeCalendar() { $("calendarView").classList.add("hidden"); }
+    function closeCalendar() { calPickMode = false; $("calPickBanner").classList.add("hidden"); $("calendarView").classList.add("hidden"); }
+    function pickDate(d) {
+      const pad = n => ("0" + n).slice(-2);
+      $("date").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      closeCalendar();
+      showMsg(`📅 Date set to ${$("date").value}${$("time").value ? " at " + $("time").value : ""}. Finish your post and click Add to Queue.`, "ok");
+    }
     function calPrev() { if (--calMonth < 0) { calMonth = 11; calYear--; } renderMonth(); }
     function calNext() { if (++calMonth > 11) { calMonth = 0; calYear++; } renderMonth(); }
     function calToday() { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); renderMonth(); }
@@ -732,11 +746,13 @@
         const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
         const cell = document.createElement("div");
         cell.className = "cal-cell" + (d.getMonth() !== calMonth ? " other" : "")
-          + (d.toDateString() === now.toDateString() ? " today" : "");
+          + (d.toDateString() === now.toDateString() ? " today" : "")
+          + (calPickMode ? " pickable" : "");
         cell.dataset.date = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
         cell.ondragover = (e) => { e.preventDefault(); cell.classList.add("drop-hover"); };
         cell.ondragleave = () => cell.classList.remove("drop-hover");
         cell.ondrop = (e) => { e.preventDefault(); handleDrop(cell); };
+        if (calPickMode) cell.onclick = () => pickDate(d);
         const num = document.createElement("div"); num.className = "cal-daynum"; num.textContent = d.getDate();
         cell.appendChild(num);
         const k = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
@@ -748,10 +764,12 @@
           const photoName = p.folder.split("/")[1].replace(/^\d{4}-\d{2}-\d{2}-/, "");
           chip.textContent = t + " " + photoName;
           chip.title = photoName + (p.caption ? " — " + p.caption : "");
-          chip.onclick = () => openDetail(idx);
-          if (p.status === "queued") {
-            chip.draggable = true;
-            chip.ondragstart = (e) => { dragIdx = idx; e.dataTransfer.effectAllowed = "move"; };
+          if (!calPickMode) {
+            chip.onclick = () => openDetail(idx);
+            if (p.status === "queued") {
+              chip.draggable = true;
+              chip.ondragstart = (e) => { dragIdx = idx; e.dataTransfer.effectAllowed = "move"; };
+            }
           }
           cell.appendChild(chip);
         });
