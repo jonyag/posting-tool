@@ -28,10 +28,26 @@
       padding: 0; float: none; margin: 0; }
     .gear:hover { color: var(--accent); }
     label { display: block; font-weight: 600; margin: 14px 0 6px; }
-    input[type=text], input[type=password], textarea, input[type=date], input[type=time] {
+    input[type=text], input[type=password], textarea, input[type=date], input[type=time], select {
       width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
     textarea { min-height: 185px; resize: vertical; }
     .hint { color: #888; font-size: 13px; margin-top: 4px; }
+    /* Caption suggestion */
+    .caption-head { display: flex; align-items: center; justify-content: space-between; }
+    .suggest-btn { background: #eef2f6; color: var(--accent); border: 1px solid var(--line);
+      border-radius: 7px; padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer; margin: 0; }
+    .suggest-btn:hover:not(:disabled) { background: #e2e9f0; }
+    .suggest-btn:disabled { color: #aaa; cursor: default; }
+    .suggestion { display: none; margin-top: 10px; border: 1px solid #d7e0ea; background: #f6f9fc;
+      border-radius: 8px; padding: 12px 14px; }
+    .suggestion.show { display: block; }
+    .sg-text { white-space: pre-wrap; font-size: 14px; color: #333; line-height: 1.45; }
+    .sg-actions { margin-top: 12px; display: flex; gap: 10px; }
+    .sg-actions button { font: inherit; font-size: 13px; font-weight: 600; border-radius: 7px;
+      padding: 7px 13px; cursor: pointer; border: 1px solid var(--line); }
+    .sg-use { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .sg-again { background: #fff; color: #555; }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > div { flex: 1; min-width: 140px; }
     .platforms { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
@@ -49,9 +65,10 @@
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35);
       display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
     .panel { background: #fff; border-radius: 12px; padding: 24px 26px; width: 100%;
-      max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+      max-width: 440px; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
     .panel h2 { margin: 0 0 6px; font-size: 18px; }
     .panel p { color: #666; font-size: 13px; margin: 0 0 14px; }
+    .panel hr { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
     .hidden { display: none !important; }
     /* Tighter padding on narrow screens (phones) */
     @media (max-width: 560px) {
@@ -78,8 +95,7 @@
   <div class="overlay hidden" id="settings">
     <div class="panel">
       <h2>Settings</h2>
-      <p>Your GitHub token lets this app save posts. It's stored only in this browser,
-         on this device. Leave repo as-is unless you renamed it.</p>
+      <p>Your keys are stored only in this browser, on this device. Leave repo as-is unless you renamed it.</p>
       <label for="setOwner">GitHub owner</label>
       <input type="text" id="setOwner" placeholder="jonyag">
       <label for="setRepo">Repository</label>
@@ -87,7 +103,23 @@
       <label for="setToken">GitHub token</label>
       <input type="password" id="setToken" placeholder="github_pat_…" autocomplete="off">
       <div class="hint" id="tokenState"></div>
-      <button class="primary" style="float:none;width:100%;margin-top:16px" onclick="saveSettings()">
+
+      <hr>
+      <h2 style="font-size:16px">✨ Caption suggestions (optional)</h2>
+      <label for="setAiKey">Anthropic API key</label>
+      <input type="password" id="setAiKey" placeholder="sk-ant-…" autocomplete="off">
+      <div class="hint">Get one at console.anthropic.com. Powers the "Suggest caption" button.</div>
+      <label for="setAiModel">Caption quality</label>
+      <select id="setAiModel">
+        <option value="claude-opus-4-8">Best voice (Opus) — about a cent or two each</option>
+        <option value="claude-haiku-4-5">Cheapest (Haiku) — a fraction of a cent each</option>
+      </select>
+      <label for="setVoice">Your writing voice</label>
+      <textarea id="setVoice" style="min-height:120px"
+        placeholder="Paste several of your past captions here (separate them with a blank line). The more you add, the more it sounds like you."></textarea>
+      <div class="hint">Used as examples so suggestions match your style.</div>
+
+      <button class="primary" style="float:none;width:100%;margin-top:18px" onclick="saveSettings()">
         Save
       </button>
       <button class="gear" style="display:block;margin:12px auto 0;font-size:13px"
@@ -104,10 +136,21 @@
     </div>
 
     <label for="photo">Photo</label>
-    <input type="file" id="photo" accept="image/*">
+    <input type="file" id="photo" accept="image/*"
+           onchange="document.getElementById('suggestion').classList.remove('show')">
 
-    <label for="caption">Caption</label>
+    <div class="caption-head">
+      <label for="caption" style="margin-bottom:0">Caption</label>
+      <button type="button" class="suggest-btn" id="suggestBtn" onclick="suggestCaption()">✨ Suggest caption</button>
+    </div>
     <textarea id="caption" placeholder="Write your caption here…"></textarea>
+    <div class="suggestion" id="suggestion">
+      <div class="sg-text" id="sgText"></div>
+      <div class="sg-actions">
+        <button type="button" class="sg-use" onclick="useSuggestion()">Use this</button>
+        <button type="button" class="sg-again" onclick="suggestCaption()">Try again</button>
+      </div>
+    </div>
 
     <label for="tags">Hashtags</label>
     <input type="text" id="tags" placeholder="#sunset #photography #bayarea">
@@ -181,12 +224,18 @@
       $("setOwner").value = LS.getItem("gh_owner") || "jonyag";
       $("setRepo").value = LS.getItem("gh_repo") || "social-autopost";
       $("setToken").value = LS.getItem("gh_token") || "";
+      $("setAiKey").value = LS.getItem("anthropic_key") || "";
+      $("setAiModel").value = LS.getItem("ai_model") || "claude-opus-4-8";
+      $("setVoice").value = LS.getItem("voice_samples") || "";
       $("settings").classList.remove("hidden");
     }
     function saveSettings() {
       LS.setItem("gh_owner", $("setOwner").value.trim() || "jonyag");
       LS.setItem("gh_repo", $("setRepo").value.trim() || "social-autopost");
       LS.setItem("gh_token", $("setToken").value.trim());
+      LS.setItem("anthropic_key", $("setAiKey").value.trim());
+      LS.setItem("ai_model", $("setAiModel").value || "claude-opus-4-8");
+      LS.setItem("voice_samples", $("setVoice").value.trim());
       $("settings").classList.add("hidden");
       refreshTokenState();
     }
@@ -275,6 +324,7 @@
         showMsg(`✓ Queued! Posts ${sched} Pacific to ${chosen.join(", ")}.\n` +
                 `Saved to ${folder}. It will post automatically — no other step needed.`, "ok");
         $("photo").value = ""; $("caption").value = ""; $("tags").value = "";
+        $("suggestion").classList.remove("show");
         document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
       } catch (err) {
         showMsg("✗ " + err.message, "err");
@@ -283,25 +333,111 @@
       }
     }
 
+    // ---------- AI caption suggestion ----------
+    // Shrink the photo before sending to Claude: faster, cheaper, and under size limits.
+    function downscaleToB64(file, maxEdge = 1568) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          let w = img.naturalWidth, h = img.naturalHeight;
+          const scale = Math.min(1, maxEdge / Math.max(w, h));
+          w = Math.round(w * scale); h = Math.round(h * scale);
+          const c = document.createElement("canvas");
+          c.width = w; c.height = h;
+          c.getContext("2d").drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image.")); };
+        img.src = url;
+      });
+    }
+
+    const CAPTION_SYSTEM =
+      "You help a fine-art photographer write the caption for a social post about one of their photographs. " +
+      "Write in the photographer's own voice, matching the tone, length, and rhythm of their example captions. " +
+      "Hard rules: sound like a real person, never like marketing or AI. " +
+      "Ban these words and anything like them: stunning, breathtaking, captivating, mesmerizing, vibrant, " +
+      "tapestry, dive in, elevate, unleash, journey, testament, nestled, whisper, symphony, embrace, hauntingly. " +
+      "No emoji unless the examples use them. No hashtags. Do not describe the obvious or say 'a photo of'. " +
+      "Keep it about the art and the moment. Match the example length (usually 1-4 sentences). " +
+      "Output ONLY the caption text — no preamble, no quotation marks, no alternatives.";
+
+    async function suggestCaption() {
+      const key = LS.getItem("anthropic_key");
+      if (!key) {
+        showMsg("Add your Anthropic API key in Settings (gear ⚙) to use ✨ Suggest caption.", "err");
+        openSettings(); return;
+      }
+      const file = $("photo").files[0];
+      if (!file) { showMsg("Choose a photo first, then I can suggest a caption for it.", "err"); return; }
+
+      const model = LS.getItem("ai_model") || "claude-opus-4-8";
+      const samples = (LS.getItem("voice_samples") || "").trim();
+      const btn = $("suggestBtn"); const old = btn.textContent;
+      btn.disabled = true; btn.textContent = "✨ Thinking…";
+      showMsg("Writing a caption in your voice…", "ok");
+      try {
+        const b64 = await downscaleToB64(file);
+        const userText = (samples
+            ? "Here are examples of my past captions so you can match my voice:\n\n" + samples + "\n\n"
+            : "I haven't given example captions yet, so write plainly and naturally in a real photographer's voice.\n\n")
+          + "Write one caption for this new photo in that same voice.";
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 1000,
+            system: CAPTION_SYSTEM,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+                { type: "text", text: userText },
+              ],
+            }],
+          }),
+        });
+        if (!res.ok) {
+          let detail = "";
+          try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+          if (res.status === 401) throw new Error("Anthropic key rejected (401). Check it in Settings.");
+          if (res.status === 429) throw new Error("Rate limited (429). Wait a moment and try again.");
+          if (/credit|balance/i.test(detail)) throw new Error("Anthropic account is out of credit. Add credit at console.anthropic.com.");
+          throw new Error("Anthropic error " + res.status + (detail ? ": " + detail : ""));
+        }
+        const data = await res.json();
+        const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+        if (!text) throw new Error("No caption came back — try again.");
+        $("sgText").textContent = text;
+        $("suggestion").classList.add("show");
+        showMsg("Here's a suggestion — use it, tweak it, or try again. Nothing posts until you click Add to Queue.", "ok");
+      } catch (err) {
+        showMsg("✗ " + err.message, "err");
+      } finally {
+        btn.disabled = false; btn.textContent = old;
+      }
+    }
+
+    function useSuggestion() {
+      $("caption").value = $("sgText").textContent;
+      $("suggestion").classList.remove("show");
+      $("caption").focus();
+    }
+
     // ---------- init ----------
     (function () {
       const now = new Date(), pad = n => String(n).padStart(2, "0");
       $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       initLock();
     })();
-
-    // Right-size the installed app window on a big monitor (best effort)
-    window.addEventListener("load", () => {
-      try {
-        if (matchMedia("(display-mode: standalone)").matches) {
-          const w = 860, h = Math.min(screen.availHeight - 100, 1040);
-          if (window.outerWidth > w + 120 || window.outerHeight > h + 120) {
-            window.resizeTo(w, h);
-            window.moveTo(Math.max(0, (screen.availWidth - w) / 2), 40);
-          }
-        }
-      } catch (e) {}
-    });
   </script>
 </body>
 </html>
