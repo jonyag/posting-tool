@@ -125,6 +125,8 @@
     <div class="panel">
       <h2 id="lockTitle">Enter PIN</h2>
       <p id="lockMsg">Enter your PIN to unlock the Posting Tool.</p>
+      <button class="primary hidden" id="bioBtn" style="float:none;width:100%;margin:0 0 14px"
+              onclick="biometricUnlock()">🔓 Unlock with Face ID / Touch ID</button>
       <input type="password" id="pinInput" inputmode="numeric" autocomplete="off"
              placeholder="PIN" onkeydown="if(event.key==='Enter')submitPin()">
       <button class="primary" style="float:none;width:100%;margin-top:16px" onclick="submitPin()">
@@ -163,6 +165,18 @@
       <label for="setNiche">Your niche &amp; location</label>
       <input type="text" id="setNiche" placeholder="e.g. fine-art bird & coastal photography, Northern California">
       <div class="hint">Helps caption and hashtag suggestions stay relevant and local.</div>
+
+      <hr>
+      <h2 style="font-size:16px">🔒 Unlock</h2>
+      <p>Use Face ID / Touch ID (or Windows Hello) to unlock on this device instead of the PIN. Your PIN still works as a backup.</p>
+      <div id="bioSetupWrap" class="hidden">
+        <button type="button" class="cal-btn" style="width:100%" onclick="registerBiometric()">Set up biometric unlock on this device</button>
+      </div>
+      <div id="bioOnWrap" class="hidden">
+        <div class="hint" style="color:#2e7d32">✓ Biometric unlock is on for this device.</div>
+        <button type="button" class="cal-btn" style="width:100%;margin-top:8px" onclick="turnOffBiometric()">Turn off biometric unlock</button>
+      </div>
+      <div class="hint" id="bioMsg"></div>
 
       <button class="primary" style="float:none;width:100%;margin-top:18px" onclick="saveSettings()">
         Save
@@ -306,7 +320,73 @@
         $("lockTitle").textContent = "Create a PIN";
         $("lockMsg").textContent = "Pick a PIN you'll remember. You'll enter it each time you open the app.";
       }
+      if (LS.getItem("webauthn_cred_id") && window.PublicKeyCredential) $("bioBtn").classList.remove("hidden");
+      else $("bioBtn").classList.add("hidden");
       $("pinInput").focus();
+    }
+
+    // ---------- biometric unlock (Face ID / Touch ID / Windows Hello) ----------
+    // A convenience layer over the PIN: success at the OS biometric prompt unlocks the app.
+    // It is NOT server-verified (no backend) — same trust level as the PIN, just easier.
+    function randBytes(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return a; }
+    function bufToB64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+    function b64ToBuf(b64) { return Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
+    function showBioMsg(t) { if ($("bioMsg")) $("bioMsg").textContent = t; }
+
+    async function refreshBioUI() {
+      const has = !!LS.getItem("webauthn_cred_id");
+      let available = false;
+      try {
+        available = !!window.PublicKeyCredential &&
+          await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      } catch (e) {}
+      $("bioOnWrap").classList.toggle("hidden", !has);
+      $("bioSetupWrap").classList.toggle("hidden", has || !available);
+      if (!has && !available) showBioMsg("This device doesn't offer biometric unlock.");
+      else showBioMsg("");
+    }
+
+    async function registerBiometric() {
+      try {
+        if (!window.PublicKeyCredential) { showBioMsg("This browser doesn't support biometric unlock."); return; }
+        const cred = await navigator.credentials.create({
+          publicKey: {
+            challenge: randBytes(32),
+            rp: { name: "Jon Yager Photography Posting Tool" },
+            user: { id: randBytes(16), name: "posting-tool", displayName: "Posting Tool" },
+            pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+            authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+            timeout: 60000,
+          },
+        });
+        LS.setItem("webauthn_cred_id", bufToB64(cred.rawId));
+        refreshBioUI();
+        showBioMsg("✓ Biometric unlock is on for this device.");
+      } catch (e) { showBioMsg("Couldn't set it up (" + (e.name || "cancelled") + "). Your PIN still works."); }
+    }
+
+    function turnOffBiometric() {
+      LS.removeItem("webauthn_cred_id");
+      refreshBioUI();
+      showBioMsg("Biometric unlock turned off for this device.");
+    }
+
+    async function biometricUnlock() {
+      const id = LS.getItem("webauthn_cred_id");
+      if (!id) return;
+      try {
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: randBytes(32),
+            allowCredentials: [{ type: "public-key", id: b64ToBuf(id) }],
+            userVerification: "required",
+            timeout: 60000,
+          },
+        });
+        unlock();
+      } catch (e) {
+        $("lockMsg").textContent = "Didn't recognize you — enter your PIN instead.";
+      }
     }
 
     // ---------- settings ----------
@@ -319,6 +399,7 @@
       $("setVoice").value = LS.getItem("voice_samples") || "";
       $("setNiche").value = LS.getItem("niche") || "";
       $("settings").classList.remove("hidden");
+      refreshBioUI();
     }
     function saveSettings() {
       LS.setItem("gh_owner", $("setOwner").value.trim() || "jonyag");
