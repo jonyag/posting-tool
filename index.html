@@ -320,9 +320,23 @@
         $("lockTitle").textContent = "Create a PIN";
         $("lockMsg").textContent = "Pick a PIN you'll remember. You'll enter it each time you open the app.";
       }
-      if (LS.getItem("webauthn_cred_id") && window.PublicKeyCredential) $("bioBtn").classList.remove("hidden");
-      else $("bioBtn").classList.add("hidden");
-      $("pinInput").focus();
+      const bioOn = LS.getItem("webauthn_cred_id") && window.PublicKeyCredential;
+      if (bioOn) {
+        $("bioBtn").classList.remove("hidden");
+        $("lockMsg").textContent = "Look at your phone to unlock — or tap anywhere. (Your PIN still works below.)";
+        // Auto-try on open; and let the first tap anywhere trigger it (iOS requires one tap).
+        setTimeout(() => biometricUnlock(true), 250);
+        const lock = $("lock");
+        const tapHandler = (e) => {
+          if (e.target.closest("button, a, input")) return;   // let the PIN field & buttons behave normally
+          lock.removeEventListener("pointerdown", tapHandler);
+          biometricUnlock(false);
+        };
+        lock.addEventListener("pointerdown", tapHandler);
+      } else {
+        $("bioBtn").classList.add("hidden");
+        $("pinInput").focus();
+      }
     }
 
     // ---------- biometric unlock (Face ID / Touch ID / Windows Hello) ----------
@@ -371,7 +385,7 @@
       showBioMsg("Biometric unlock turned off for this device.");
     }
 
-    async function biometricUnlock() {
+    async function biometricUnlock(silent) {
       const id = LS.getItem("webauthn_cred_id");
       if (!id) return;
       try {
@@ -385,7 +399,7 @@
         });
         unlock();
       } catch (e) {
-        $("lockMsg").textContent = "Didn't recognize you — enter your PIN instead.";
+        if (!silent) $("lockMsg").textContent = "Didn't recognize you — tap the Face ID button to retry, or use your PIN.";
       }
     }
 
