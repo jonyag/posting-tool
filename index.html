@@ -210,6 +210,15 @@
       <label for="caption" style="margin-bottom:0">Caption</label>
       <button type="button" class="suggest-btn" id="suggestBtn" onclick="suggestCaption()">✨ Suggest caption</button>
     </div>
+    <select id="capStyle" style="margin-bottom:6px">
+      <option value="myvoice">Style: My voice (about the art)</option>
+      <option value="auto">Style: Insight — let AI choose</option>
+      <option value="philosophical">Style: Insight — philosophical / reflective</option>
+      <option value="culture">Style: Insight — management &amp; culture</option>
+      <option value="encouraging">Style: Insight — encouraging</option>
+      <option value="candid">Style: Insight — tell it like it is</option>
+      <option value="funny">Style: Insight — light &amp; funny</option>
+    </select>
     <textarea id="caption" placeholder="Write your caption here, or tap ✨ Suggest caption above…"></textarea>
     <div class="suggestion" id="suggestion">
       <div class="sg-text" id="sgText"></div>
@@ -634,58 +643,34 @@
       "Output ONLY the caption text — no preamble, no quotation marks, no alternatives.";
 
     async function suggestCaption() {
-      const key = LS.getItem("anthropic_key");
-      if (!key) {
+      if (!LS.getItem("anthropic_key")) {
         showMsg("Add your Anthropic API key in Settings (gear ⚙) to use ✨ Suggest caption.", "err");
         openSettings(); return;
       }
       const file = getSelectedFile();
       if (!file) { showMsg("Choose a photo first, then I can suggest a caption for it.", "err"); return; }
 
-      const model = LS.getItem("ai_model") || "claude-opus-4-8";
-      const samples = (LS.getItem("voice_samples") || "").trim();
+      const style = $("capStyle").value;
+      const niche = (LS.getItem("niche") || "").trim();
       const btn = $("suggestBtn"); const old = btn.textContent;
       btn.disabled = true; btn.textContent = "✨ Thinking…";
-      showMsg("Writing a caption in your voice…", "ok");
+      showMsg("Writing a caption…", "ok");
       try {
-        const b64 = await downscaleToB64(file);
-        const niche = (LS.getItem("niche") || "").trim();
-        const userText = (niche ? "My niche and location: " + niche + "\n\n" : "")
-          + (samples
-            ? "Here are examples of my past captions so you can match my voice:\n\n" + samples + "\n\n"
-            : "I haven't given example captions yet, so write plainly and naturally in a real photographer's voice.\n\n")
-          + "Write one caption for this new photo in that same voice.";
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: 1000,
-            system: CAPTION_SYSTEM,
-            messages: [{
-              role: "user",
-              content: [
-                { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
-                { type: "text", text: userText },
-              ],
-            }],
-          }),
-        });
-        if (!res.ok) {
-          let detail = "";
-          try { detail = (await res.json()).error?.message || ""; } catch (e) {}
-          if (res.status === 401) throw new Error("Anthropic key rejected (401). Check it in Settings.");
-          if (res.status === 429) throw new Error("Rate limited (429). Wait a moment and try again.");
-          if (/credit|balance/i.test(detail)) throw new Error("Anthropic account is out of credit. Add credit at console.anthropic.com.");
-          throw new Error("Anthropic error " + res.status + (detail ? ": " + detail : ""));
+        let text;
+        if (style === "myvoice") {
+          const samples = (LS.getItem("voice_samples") || "").trim();
+          const userText = (niche ? "My niche and location: " + niche + "\n\n" : "")
+            + (samples
+              ? "Here are examples of my past captions so you can match my voice:\n\n" + samples + "\n\n"
+              : "I haven't given example captions yet, so write plainly and naturally in a real photographer's voice.\n\n")
+            + "Write one caption for this new photo in that same voice.";
+          text = await claudeVision(CAPTION_SYSTEM, userText, file, 1000);
+        } else {
+          const angle = LI_ANGLES[style] || LI_ANGLES.auto;
+          const userText = (niche ? "About me: " + niche + "\n\n" : "")
+            + "Tone for this one: " + angle + "\n\nWrite a short post inspired by this photo.";
+          text = await claudeVision(INSIGHT_SYSTEM, userText, file, 1000);
         }
-        const data = await res.json();
-        const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
         if (!text) throw new Error("No caption came back — try again.");
         $("sgText").textContent = text;
         $("suggestion").classList.add("show");
@@ -806,8 +791,8 @@
       funny: "Lighthearted and genuinely funny — a wry, human observation.",
     };
 
-    const LINKEDIN_SYSTEM =
-      "You help an artist who is also a senior corporate leader write a LinkedIn post inspired by one of their own photographs. " +
+    const INSIGHT_SYSTEM =
+      "You help an artist who is also a senior corporate leader write a short social post inspired by one of their own photographs. " +
       "START FROM THE PHOTOGRAPH: first genuinely notice what is actually in it — the subject, the light, the moment, the patience or craft behind it — " +
       "then build OUTWARD from that specific observation into a real insight about culture, leadership, management, or personal growth. " +
       "The image is the seed; the insight must feel like it grew from truly looking at the picture, never bolted on. " +
@@ -835,7 +820,7 @@
       try {
         const userText = (niche ? "About me: " + niche + "\n\n" : "")
           + "Tone for this one: " + angle + "\n\nWrite a LinkedIn post inspired by this photo.";
-        const text = await claudeVision(LINKEDIN_SYSTEM, userText, file, 1000);
+        const text = await claudeVision(INSIGHT_SYSTEM, userText, file, 1000);
         if (!text) throw new Error("Nothing came back — try again.");
         $("liCaption").value = text;
         showMsg("LinkedIn draft ready — edit it, then tap '📋 Copy & open LinkedIn'.", "ok");
