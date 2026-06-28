@@ -98,6 +98,13 @@
     .detail-img { width: 100%; border-radius: 8px; margin: 4px 0 12px; background: #f2f2f2; }
     .detail-row { font-size: 13px; margin: 6px 0; color: #444; }
     .detail-row b { color: #222; }
+    .pd-head { position: sticky; top: 0; background: #fff; z-index: 1;
+      display: flex; align-items: center; justify-content: space-between;
+      margin: -24px -26px 10px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+    .pd-head h2 { margin: 0; font-size: 18px; }
+    .pd-x { background: none; border: 0; font-size: 26px; line-height: 1; color: #888;
+      cursor: pointer; padding: 0 4px; }
+    .pd-x:hover { color: var(--accent); }
     @media (max-width: 560px) {
       .calview { padding: 16px 12px 36px; }
       .cal-cell { min-height: 62px; padding: 3px; }
@@ -303,7 +310,11 @@
   <!-- Post detail -->
   <div class="overlay hidden" id="postDetail">
     <div class="panel">
-      <h2 id="pdTitle">Post</h2>
+      <div class="pd-head">
+        <h2 id="pdTitle">Post</h2>
+        <button type="button" class="pd-x" title="Close"
+                onclick="document.getElementById('postDetail').classList.add('hidden')">&times;</button>
+      </div>
       <img class="detail-img" id="pdImg" alt="" style="display:none">
       <div id="pdBody"></div>
       <button class="primary" style="float:none;width:100%;margin-top:14px"
