@@ -477,8 +477,14 @@
     function onPhotoInputChange() {
       $("suggestion").classList.remove("show");
       $("hashSug").classList.remove("show");
+      warnIfLarge($("photo").files[0]);
     }
     function getSelectedFile() { return FS_SUPPORTED ? pickedFile : $("photo").files[0]; }
+    function warnIfLarge(file) {
+      if (file && file.size > 50 * 1024 * 1024) {
+        showMsg("Heads up: this photo is " + Math.round(file.size / 1048576) + " MB. Large files can be slow, and the auto-poster caps around 100 MB — consider a smaller export, or post this one manually.", "err");
+      }
+    }
     async function pickPhotoFS() {
       try {
         const [handle] = await window.showOpenFilePicker({
@@ -493,6 +499,7 @@
         photoMarked = false;
         $("photoName").textContent = "📷 " + pickedFile.name;
         $("photoName").classList.remove("hidden");
+        warnIfLarge(pickedFile);
         $("suggestion").classList.remove("show");
         $("hashSug").classList.remove("show");
       } catch (e) { /* user cancelled the picker */ }
@@ -542,6 +549,10 @@
 
       const file = getSelectedFile();
       if (!file) { showMsg("Please choose a photo first.", "err"); return; }
+      if (file.size > 100 * 1024 * 1024) {
+        showMsg("This photo is " + Math.round(file.size / 1048576) + " MB — too large to auto-post (≈100 MB limit). Use a smaller export, or post it manually.", "err");
+        return;
+      }
       const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
       if (!chosen.length) { showMsg("Pick at least one platform.", "err"); return; }
       const date = $("date").value, time = $("time").value;
