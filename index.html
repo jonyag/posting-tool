@@ -187,6 +187,23 @@
     </div>
   </div>
 
+  <!-- Caption style picker -->
+  <div class="overlay hidden" id="stylePicker">
+    <div class="panel">
+      <h2>Choose a caption style</h2>
+      <p>Which voice should I write in for this photo?</p>
+      <button type="button" class="cal-btn" style="width:100%;margin-bottom:6px;text-align:left" onclick="pickStyle('myvoice')">My voice — about the art</button>
+      <button type="button" class="cal-btn" style="width:100%;margin-bottom:6px;text-align:left" onclick="pickStyle('auto')">Insight — let AI choose</button>
+      <button type="button" class="cal-btn" style="width:100%;margin-bottom:6px;text-align:left" onclick="pickStyle('philosophical')">Insight — philosophical / reflective</button>
+      <button type="button" class="cal-btn" style="width:100%;margin-bottom:6px;text-align:left" onclick="pickStyle('culture')">Insight — management &amp; culture</button>
+      <button type="button" class="cal-btn" style="width:100%;margin-bottom:6px;text-align:left" onclick="pickStyle('encouraging')">Insight — encouraging</button>
+      <button type="button" class="cal-btn" style="width:100%;margin-bottom:6px;text-align:left" onclick="pickStyle('candid')">Insight — tell it like it is</button>
+      <button type="button" class="cal-btn" style="width:100%;text-align:left" onclick="pickStyle('funny')">Insight — light &amp; funny</button>
+      <button class="gear" style="display:block;margin:14px auto 0;font-size:13px"
+              onclick="document.getElementById('stylePicker').classList.add('hidden')">Cancel</button>
+    </div>
+  </div>
+
   <!-- Main form -->
   <form class="card" id="app" onsubmit="addToQueue(event)">
     <div class="banner"><img src="logo.png" alt="Jon Yager Photography"></div>
@@ -210,21 +227,13 @@
       <label for="caption" style="margin-bottom:0">Caption</label>
       <button type="button" class="suggest-btn" id="suggestBtn" onclick="suggestCaption()">✨ Suggest caption</button>
     </div>
-    <select id="capStyle" style="margin-bottom:6px">
-      <option value="myvoice">Style: My voice (about the art)</option>
-      <option value="auto">Style: Insight — let AI choose</option>
-      <option value="philosophical">Style: Insight — philosophical / reflective</option>
-      <option value="culture">Style: Insight — management &amp; culture</option>
-      <option value="encouraging">Style: Insight — encouraging</option>
-      <option value="candid">Style: Insight — tell it like it is</option>
-      <option value="funny">Style: Insight — light &amp; funny</option>
-    </select>
     <textarea id="caption" placeholder="Write your caption here, or tap ✨ Suggest caption above…"></textarea>
     <div class="suggestion" id="suggestion">
       <div class="sg-text" id="sgText"></div>
       <div class="sg-actions">
         <button type="button" class="sg-use" onclick="useSuggestion()">Use this</button>
-        <button type="button" class="sg-again" onclick="suggestCaption()">Try again</button>
+        <button type="button" class="sg-again" onclick="generateCaption(currentStyle)">Try again</button>
+        <button type="button" class="sg-again" onclick="changeStyle()">Change style</button>
       </div>
     </div>
 
@@ -245,6 +254,11 @@
       <label><input type="checkbox" value="bluesky"> Bluesky</label>
       <label><input type="checkbox" value="mastodon"> Mastodon</label>
     </div>
+    <div class="li-section">
+      <button type="button" class="suggest-btn" style="width:100%"
+              onclick="prepareLinkedIn()">📋 Copy caption &amp; open LinkedIn</button>
+      <div class="hint" style="margin-top:6px">Uses the caption above — copies it and opens LinkedIn so you can paste, attach this photo, and post. Tip: pick an "Insight" style for that voice.</div>
+    </div>
 
     <div class="row">
       <div><label for="date">Date</label><input type="date" id="date"></div>
@@ -254,31 +268,6 @@
 
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
-
-    <div class="li-section">
-      <button type="button" class="suggest-btn" id="liToggle" style="width:100%;text-align:left"
-              onclick="toggleLinkedIn()">💼 LinkedIn post (optional) ▸</button>
-      <div id="liBody" class="hidden">
-        <div class="hint" style="margin-top:8px">A separate, manual post in a different voice. The tool writes &amp; copies it; you paste it into LinkedIn, attach this photo, and post (LinkedIn's own clock icon can schedule it).</div>
-        <label for="liAngle" style="margin-top:10px">Tone</label>
-        <select id="liAngle">
-          <option value="auto">Let AI choose</option>
-          <option value="philosophical">Philosophical / reflective</option>
-          <option value="culture">Management &amp; culture</option>
-          <option value="encouraging">Encouraging</option>
-          <option value="candid">Tell it like it is</option>
-          <option value="funny">Light &amp; funny</option>
-        </select>
-        <div class="caption-head" style="margin-top:12px">
-          <label for="liCaption" style="margin-bottom:0">LinkedIn caption</label>
-          <button type="button" class="suggest-btn" id="liSuggestBtn" onclick="suggestLinkedIn()">✨ Suggest (LinkedIn)</button>
-        </div>
-        <textarea id="liCaption" style="min-height:150px"
-          placeholder="Write your LinkedIn post here, or tap ✨ Suggest (LinkedIn)…"></textarea>
-        <button type="button" class="primary" style="float:none;width:100%;margin-top:12px"
-                onclick="prepareLinkedIn()">📋 Copy &amp; open LinkedIn</button>
-      </div>
-    </div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -642,15 +631,27 @@
       "Never mention or hint at finance, money, investing, markets, or the economy. " +
       "Output ONLY the caption text — no preamble, no quotation marks, no alternatives.";
 
-    async function suggestCaption() {
+    let currentStyle = "myvoice";
+
+    // Clicking "Suggest caption" first asks which style, then generates.
+    function suggestCaption() {
       if (!LS.getItem("anthropic_key")) {
         showMsg("Add your Anthropic API key in Settings (gear ⚙) to use ✨ Suggest caption.", "err");
         openSettings(); return;
       }
-      const file = getSelectedFile();
-      if (!file) { showMsg("Choose a photo first, then I can suggest a caption for it.", "err"); return; }
+      if (!getSelectedFile()) { showMsg("Choose a photo first, then I can suggest a caption for it.", "err"); return; }
+      $("stylePicker").classList.remove("hidden");
+    }
+    function changeStyle() { $("stylePicker").classList.remove("hidden"); }
+    function pickStyle(style) {
+      $("stylePicker").classList.add("hidden");
+      currentStyle = style;
+      generateCaption(style);
+    }
 
-      const style = $("capStyle").value;
+    async function generateCaption(style) {
+      const file = getSelectedFile();
+      if (!file) { showMsg("Choose a photo first.", "err"); return; }
       const niche = (LS.getItem("niche") || "").trim();
       const btn = $("suggestBtn"); const old = btn.textContent;
       btn.disabled = true; btn.textContent = "✨ Thinking…";
@@ -674,7 +675,7 @@
         if (!text) throw new Error("No caption came back — try again.");
         $("sgText").textContent = text;
         $("suggestion").classList.add("show");
-        showMsg("Here's a suggestion — use it, tweak it, or try again. Nothing posts until you click Add to Queue.", "ok");
+        showMsg("Here's a suggestion — use it, tweak it, try again, or change the style. Nothing posts until you click Add to Queue.", "ok");
       } catch (err) {
         showMsg("✗ " + err.message, "err");
       } finally {
@@ -776,12 +777,7 @@
       input.value = cur.join(" ");
     }
 
-    // ---------- LinkedIn (assisted manual: prep caption, copy, open composer) ----------
-    function toggleLinkedIn() {
-      const nowHidden = $("liBody").classList.toggle("hidden");
-      $("liToggle").textContent = "💼 LinkedIn post (optional) " + (nowHidden ? "▸" : "▾");
-    }
-
+    // ---------- caption styles + LinkedIn hand-off ----------
     const LI_ANGLES = {
       auto: "Pick whichever fits the photo best: reflective/philosophical, a culture or leadership lesson, encouraging, candid/straight-talking, or wry and funny.",
       philosophical: "Reflective and philosophical — about time, attention, seeing, patience, or craft.",
@@ -806,31 +802,9 @@
       "Keep it to 2-6 short lines. A light question or takeaway at the end only if it fits naturally. " +
       "No hashtags. Output ONLY the post text.";
 
-    async function suggestLinkedIn() {
-      if (!LS.getItem("anthropic_key")) {
-        showMsg("Add your Anthropic API key in Settings (gear ⚙) first.", "err"); openSettings(); return;
-      }
-      const file = getSelectedFile();
-      if (!file) { showMsg("Choose a photo first.", "err"); return; }
-      const angle = LI_ANGLES[$("liAngle").value] || LI_ANGLES.auto;
-      const niche = (LS.getItem("niche") || "").trim();
-      const btn = $("liSuggestBtn"); const old = btn.textContent;
-      btn.disabled = true; btn.textContent = "✨ Thinking…";
-      showMsg("Writing a LinkedIn post…", "ok");
-      try {
-        const userText = (niche ? "About me: " + niche + "\n\n" : "")
-          + "Tone for this one: " + angle + "\n\nWrite a LinkedIn post inspired by this photo.";
-        const text = await claudeVision(INSIGHT_SYSTEM, userText, file, 1000);
-        if (!text) throw new Error("Nothing came back — try again.");
-        $("liCaption").value = text;
-        showMsg("LinkedIn draft ready — edit it, then tap '📋 Copy & open LinkedIn'.", "ok");
-      } catch (err) { showMsg("✗ " + err.message, "err"); }
-      finally { btn.disabled = false; btn.textContent = old; }
-    }
-
     async function prepareLinkedIn() {
-      const cap = $("liCaption").value.trim();
-      if (!cap) { showMsg("Write or suggest a LinkedIn caption first.", "err"); return; }
+      const cap = $("caption").value.trim();
+      if (!cap) { showMsg("Write or suggest a caption above first.", "err"); return; }
       let copied = true;
       try { await navigator.clipboard.writeText(cap); } catch (e) { copied = false; }
       const markNote = await markOriginal($("date").value);
