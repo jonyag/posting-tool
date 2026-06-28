@@ -277,7 +277,9 @@
       <label for="flTitle">Flickr title (optional)</label>
       <input type="text" id="flTitle" placeholder="Blank = use the caption's first line">
       <label for="flAlbum">Album (optional)</label>
-      <input type="text" id="flAlbum" placeholder="Album name — created if it doesn't exist">
+      <input type="text" id="flAlbum" list="flAlbumList" autocomplete="off"
+             placeholder="Type to find your albums (or a new name to create one)">
+      <datalist id="flAlbumList"></datalist>
       <label for="flGroups">Groups (optional)</label>
       <input type="text" id="flGroups" placeholder="Comma-separated group names you've joined">
       <div class="hint">Caption → Flickr description, hashtags → tags. Groups: only ones you've joined — add a few, not a blast.</div>
@@ -364,7 +366,22 @@
     function unlock() {
       $("lock").classList.add("hidden");
       refreshTokenState();
+      loadFlickrAlbums();
       if (!LS.getItem("gh_token")) openSettings();   // nudge first-time setup
+    }
+
+    // Pull the saved Flickr album list into the album field's autocomplete.
+    async function loadFlickrAlbums() {
+      if (!LS.getItem("gh_token")) return;
+      try {
+        const r = await ghGet("contents/flickr_albums.json", true);
+        if (!r.ok) return;
+        const albums = JSON.parse(await r.text());
+        const dl = $("flAlbumList");
+        if (!dl) return;
+        dl.innerHTML = "";
+        (albums || []).forEach(a => { const o = document.createElement("option"); o.value = a; dl.appendChild(o); });
+      } catch (e) {}
     }
     function initLock() {
       if (LS.getItem("pin_hash")) {
