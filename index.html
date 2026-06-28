@@ -1019,6 +1019,12 @@
         if (fb) html += `<div class="detail-row">📘 ${fb}</div>`;
         if (!ig && !fb) html += `<div class="detail-row" style="color:#999">No numbers yet — check after the daily refresh.</div>`;
         html += `<div class="hint">Updated ${esc(p.stats.fetched_at || "")} · refreshes daily</div>`;
+        const links = [];
+        if (p.stats.instagram && p.stats.instagram.permalink)
+          links.push(`<a class="cal-btn" style="display:inline-block;text-decoration:none;margin-top:10px" href="${p.stats.instagram.permalink}" target="_blank" rel="noopener">📷 Open on Instagram</a>`);
+        if (p.stats.facebook && p.stats.facebook.permalink)
+          links.push(`<a class="cal-btn" style="display:inline-block;text-decoration:none;margin:10px 0 0 8px" href="${p.stats.facebook.permalink}" target="_blank" rel="noopener">📘 Open on Facebook</a>`);
+        if (links.length) html += `<div class="detail-row">${links.join("")}</div>`;
       }
       if (p.status === "queued") {
         html +=
