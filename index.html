@@ -52,6 +52,7 @@
       border: 1px solid var(--line); background: #fff; color: var(--accent); font-size: 13px; cursor: pointer; }
     .hash-chip:hover { border-color: var(--accent); }
     .hash-chip.added { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .li-section { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 10px; }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > div { flex: 1; min-width: 140px; }
     .platforms { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
@@ -241,6 +242,31 @@
 
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
+
+    <div class="li-section">
+      <button type="button" class="suggest-btn" id="liToggle" style="width:100%;text-align:left"
+              onclick="toggleLinkedIn()">💼 LinkedIn post (optional) ▸</button>
+      <div id="liBody" class="hidden">
+        <div class="hint" style="margin-top:8px">A separate, manual post in a different voice. The tool writes &amp; copies it; you paste it into LinkedIn, attach this photo, and post (LinkedIn's own clock icon can schedule it).</div>
+        <label for="liAngle" style="margin-top:10px">Tone</label>
+        <select id="liAngle">
+          <option value="auto">Let AI choose</option>
+          <option value="philosophical">Philosophical / reflective</option>
+          <option value="culture">Management &amp; culture</option>
+          <option value="encouraging">Encouraging</option>
+          <option value="candid">Tell it like it is</option>
+          <option value="funny">Light &amp; funny</option>
+        </select>
+        <div class="caption-head" style="margin-top:12px">
+          <label for="liCaption" style="margin-bottom:0">LinkedIn caption</label>
+          <button type="button" class="suggest-btn" id="liSuggestBtn" onclick="suggestLinkedIn()">✨ Suggest (LinkedIn)</button>
+        </div>
+        <textarea id="liCaption" style="min-height:150px"
+          placeholder="Write your LinkedIn post here, or tap ✨ Suggest (LinkedIn)…"></textarea>
+        <button type="button" class="primary" style="float:none;width:100%;margin-top:12px"
+                onclick="prepareLinkedIn()">📋 Copy &amp; open LinkedIn</button>
+      </div>
+    </div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -597,6 +623,7 @@
       "tapestry, dive in, elevate, unleash, journey, testament, nestled, whisper, symphony, embrace, hauntingly. " +
       "No emoji unless the examples use them. No hashtags. Do not describe the obvious or say 'a photo of'. " +
       "Keep it about the art and the moment. Match the example length (usually 1-4 sentences). " +
+      "Never mention or hint at finance, money, investing, markets, or the economy. " +
       "Output ONLY the caption text — no preamble, no quotation marks, no alternatives.";
 
     async function suggestCaption() {
@@ -755,6 +782,70 @@
       if (i >= 0) { cur.splice(i, 1); el.classList.remove("added"); }
       else { cur.push(norm); el.classList.add("added"); }
       input.value = cur.join(" ");
+    }
+
+    // ---------- LinkedIn (assisted manual: prep caption, copy, open composer) ----------
+    function toggleLinkedIn() {
+      const nowHidden = $("liBody").classList.toggle("hidden");
+      $("liToggle").textContent = "💼 LinkedIn post (optional) " + (nowHidden ? "▸" : "▾");
+    }
+
+    const LI_ANGLES = {
+      auto: "Pick whichever fits the photo best: reflective/philosophical, a culture or leadership lesson, encouraging, candid/straight-talking, or wry and funny.",
+      philosophical: "Reflective and philosophical — about time, attention, seeing, patience, or craft.",
+      culture: "A leadership, teamwork, or company-culture lesson drawn from the photo or the craft of making it.",
+      encouraging: "Warm and encouraging — genuinely lift the reader up.",
+      candid: "Candid and straight-talking — honest, seeing things as they really are, no sugarcoating.",
+      funny: "Lighthearted and genuinely funny — a wry, human observation.",
+    };
+
+    const LINKEDIN_SYSTEM =
+      "You help an artist who is also a senior corporate leader write a LinkedIn post inspired by one of their own photographs. " +
+      "START FROM THE PHOTOGRAPH: first genuinely notice what is actually in it — the subject, the light, the moment, the patience or craft behind it — " +
+      "then build OUTWARD from that specific observation into a real insight about culture, leadership, management, or personal growth. " +
+      "The image is the seed; the insight must feel like it grew from truly looking at the picture, never bolted on. " +
+      "Voice: an artist's eye plus an experienced leader's perspective — thoughtful, specific, human. " +
+      "A strong first line that hooks, then a few short lines, one genuine point. " +
+      "STRICT COMPLIANCE — NON-NEGOTIABLE: never mention or even hint at finance, money, investing, markets, the economy, stocks, " +
+      "returns, wealth, fundraising, or any company's financial performance. If an idea heads that way, pick a different angle entirely. " +
+      "The author is under regulatory restrictions, so this is a hard rule. " +
+      "Also avoid corporate buzzword soup and fake-deep 'broetry': no leverage, synergy, unlock, game-changer, humbled to announce, " +
+      "needle-mover, circle back, or obvious AI tells. Be real. " +
+      "Keep it to 2-6 short lines. A light question or takeaway at the end only if it fits naturally. " +
+      "No hashtags. Output ONLY the post text.";
+
+    async function suggestLinkedIn() {
+      if (!LS.getItem("anthropic_key")) {
+        showMsg("Add your Anthropic API key in Settings (gear ⚙) first.", "err"); openSettings(); return;
+      }
+      const file = getSelectedFile();
+      if (!file) { showMsg("Choose a photo first.", "err"); return; }
+      const angle = LI_ANGLES[$("liAngle").value] || LI_ANGLES.auto;
+      const niche = (LS.getItem("niche") || "").trim();
+      const btn = $("liSuggestBtn"); const old = btn.textContent;
+      btn.disabled = true; btn.textContent = "✨ Thinking…";
+      showMsg("Writing a LinkedIn post…", "ok");
+      try {
+        const userText = (niche ? "About me: " + niche + "\n\n" : "")
+          + "Tone for this one: " + angle + "\n\nWrite a LinkedIn post inspired by this photo.";
+        const text = await claudeVision(LINKEDIN_SYSTEM, userText, file, 1000);
+        if (!text) throw new Error("Nothing came back — try again.");
+        $("liCaption").value = text;
+        showMsg("LinkedIn draft ready — edit it, then tap '📋 Copy & open LinkedIn'.", "ok");
+      } catch (err) { showMsg("✗ " + err.message, "err"); }
+      finally { btn.disabled = false; btn.textContent = old; }
+    }
+
+    async function prepareLinkedIn() {
+      const cap = $("liCaption").value.trim();
+      if (!cap) { showMsg("Write or suggest a LinkedIn caption first.", "err"); return; }
+      try {
+        await navigator.clipboard.writeText(cap);
+        showMsg("✓ Copied! Opening LinkedIn — click 'Start a post', paste (Ctrl/Cmd+V), attach this photo, and post. (LinkedIn's clock icon can schedule it.)", "ok");
+      } catch (e) {
+        showMsg("Couldn't auto-copy — select the LinkedIn text and copy it manually. Opening LinkedIn…", "err");
+      }
+      window.open("https://www.linkedin.com/feed/?shareActive=true", "_blank", "noopener");
     }
 
     // ---------- calendar / schedule view ----------
