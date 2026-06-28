@@ -247,6 +247,12 @@
       <div id="hashChips"></div>
     </div>
 
+    <div class="row">
+      <div><label for="date">Date</label><input type="date" id="date"></div>
+      <div><label for="time">Time</label><input type="time" id="time" value="12:00"></div>
+    </div>
+    <button type="button" class="suggest-btn" style="margin-top:8px" onclick="openCalendar(true)">📅 Pick date on calendar</button>
+
     <label>Post to</label>
     <div class="platforms">
       <label><input type="checkbox" value="facebook"> Facebook</label>
@@ -259,12 +265,6 @@
               onclick="prepareLinkedIn()">📋 Copy caption &amp; open LinkedIn</button>
       <div class="hint" style="margin-top:6px">Uses the caption above — copies it and opens LinkedIn so you can paste, attach this photo, and post. Tip: pick an "Insight" style for that voice.</div>
     </div>
-
-    <div class="row">
-      <div><label for="date">Date</label><input type="date" id="date"></div>
-      <div><label for="time">Time</label><input type="time" id="time" value="12:00"></div>
-    </div>
-    <button type="button" class="suggest-btn" style="margin-top:8px" onclick="openCalendar(true)">📅 Pick date on calendar</button>
 
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
