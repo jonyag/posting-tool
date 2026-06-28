@@ -849,6 +849,9 @@
         const imgs = tree.filter(t => t.type === "blob" && /^(queue|posted)\/[^/]+\/[^/]+\.(jpe?g|png|gif|webp)$/i.test(t.path));
         const imgByFolder = {};
         for (const im of imgs) imgByFolder[im.path.split("/").slice(0, 2).join("/")] = im.path;
+        const statsByFolder = {};
+        tree.filter(t => t.type === "blob" && /^posted\/[^/]+\/stats\.json$/.test(t.path))
+          .forEach(t => statsByFolder[t.path.split("/").slice(0, 2).join("/")] = t.path);
 
         const out = await Promise.all(yamls.map(async y => {
           try {
@@ -857,8 +860,16 @@
             const text = await cr.text();
             const p = parsePost(text);
             const folder = y.path.split("/").slice(0, 2).join("/");
+            let stats = null;
+            const sp = statsByFolder[folder];
+            if (sp) {
+              try {
+                const sr = await ghGet("contents/" + sp.split("/").map(encodeURIComponent).join("/"), true);
+                if (sr.ok) stats = JSON.parse(await sr.text());
+              } catch (e) {}
+            }
             return { folder, status: y.path.startsWith("queue/") ? "queued" : "posted",
-                     imagePath: imgByFolder[folder] || null,
+                     imagePath: imgByFolder[folder] || null, stats,
                      yamlPath: y.path, yamlSha: y.sha, yamlText: text, ...p };
           } catch (e) { return null; }
         }));
@@ -907,7 +918,15 @@
           chip.className = "chip " + p.status;
           const t = ("0" + p.date.getHours()).slice(-2) + ":" + ("0" + p.date.getMinutes()).slice(-2);
           const photoName = p.folder.split("/")[1].replace(/^\d{4}-\d{2}-\d{2}-/, "");
-          chip.textContent = t + " " + photoName;
+          let eng = "";
+          if (p.stats) {
+            const il = p.stats.instagram && p.stats.instagram.likes;
+            const fl = p.stats.facebook && p.stats.facebook.likes;
+            if (typeof il === "number" || typeof fl === "number") {
+              eng = "  ❤" + ((typeof il === "number" ? il : 0) + (typeof fl === "number" ? fl : 0));
+            }
+          }
+          chip.textContent = t + " " + photoName + eng;
           chip.title = photoName + (p.caption ? " — " + p.caption : "");
           if (!calPickMode) {
             chip.onclick = () => openDetail(idx);
@@ -988,6 +1007,19 @@
         `<div class="detail-row"><b>To:</b> ${esc((p.platforms || []).join(", ")) || "—"}</div>` +
         `<div class="detail-row"><b>Caption:</b> ${esc(p.caption) || "—"}</div>` +
         `<div class="detail-row" style="color:#999"><b>Folder:</b> ${esc(p.folder)}</div>`;
+      if (p.status === "posted" && p.stats) {
+        const eng = (obj, keys) => keys.filter(([k]) => obj && typeof obj[k] === "number")
+          .map(([k, lbl]) => `${lbl} ${obj[k]}`).join("  ·  ");
+        const ig = p.stats.instagram ? eng(p.stats.instagram,
+          [["likes","❤"],["comments","💬"],["reach","Reach"],["views","Views"],["saved","Saves"],["shares","Shares"]]) : "";
+        const fb = p.stats.facebook ? eng(p.stats.facebook,
+          [["likes","❤"],["comments","💬"],["shares","Shares"]]) : "";
+        html += `<div class="detail-row" style="margin-top:12px"><b>Engagement</b></div>`;
+        if (ig) html += `<div class="detail-row">📷 ${ig}</div>`;
+        if (fb) html += `<div class="detail-row">📘 ${fb}</div>`;
+        if (!ig && !fb) html += `<div class="detail-row" style="color:#999">No numbers yet — check after the daily refresh.</div>`;
+        html += `<div class="hint">Updated ${esc(p.stats.fetched_at || "")} · refreshes daily</div>`;
+      }
       if (p.status === "queued") {
         html +=
           `<div class="detail-row" style="margin-top:14px"><b>Edit date and time</b></div>` +
