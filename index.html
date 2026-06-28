@@ -202,6 +202,9 @@
     <input type="file" id="photo" accept="image/*" onchange="onPhotoInputChange()">
     <button type="button" class="suggest-btn hidden" id="photoPickBtn" style="margin-top:2px" onclick="pickPhotoFS()">Choose photo…</button>
     <div class="hint hidden" id="photoName"></div>
+    <label class="hidden" id="markFileWrap" style="font-weight:500;margin-top:8px;display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="markFile" checked> Mark original photo with ✓ + date when I use it
+    </label>
 
     <div class="caption-head">
       <label for="caption" style="margin-bottom:0">Caption</label>
@@ -307,7 +310,7 @@
     const $ = (id) => document.getElementById(id);
     const LS = localStorage;
     const FS_SUPPORTED = "showOpenFilePicker" in window;   // Chromium desktop: lets us mark (rename) the original
-    let pickedFile = null, pickedFileHandle = null;
+    let pickedFile = null, pickedFileHandle = null, photoMarked = false;
     async function sha256(t) {
       const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
       return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
@@ -489,13 +492,34 @@
         });
         pickedFileHandle = handle;
         pickedFile = await handle.getFile();
-        // Ask for edit permission now, while we still have a user gesture, so marking works later.
-        try { if (handle.requestPermission) await handle.requestPermission({ mode: "readwrite" }); } catch (e) {}
+        photoMarked = false;
         $("photoName").textContent = "📷 " + pickedFile.name;
         $("photoName").classList.remove("hidden");
         $("suggestion").classList.remove("show");
         $("hashSug").classList.remove("show");
       } catch (e) { /* user cancelled the picker */ }
+    }
+
+    // Optionally rename the original file to mark it used (✓ + date). Controlled by the
+    // "Mark original" checkbox; only on Chromium desktop (needs the file handle).
+    async function markOriginal(dateStr) {
+      if (!(FS_SUPPORTED && pickedFileHandle && pickedFileHandle.move)) return "";
+      const cb = $("markFile");
+      if (cb && !cb.checked) return "";
+      if (photoMarked) return "";
+      try {
+        let perm = await pickedFileHandle.queryPermission({ mode: "readwrite" });
+        if (perm !== "granted") perm = await pickedFileHandle.requestPermission({ mode: "readwrite" });
+        if (perm !== "granted") return "\n(Original not marked — file-edit permission wasn't granted.)";
+        const nm = pickedFile.name, dot = nm.lastIndexOf(".");
+        const stem2 = dot >= 0 ? nm.slice(0, dot) : nm;
+        const ext2 = dot >= 0 ? nm.slice(dot) : "";
+        if (stem2.includes(" ✓ ")) { photoMarked = true; return ""; }
+        const md = (dateStr || "").slice(5, 7) + "-" + (dateStr || "").slice(8, 10);
+        await pickedFileHandle.move(`${stem2} ✓ ${md}${ext2}`);
+        photoMarked = true;
+        return `\nOriginal marked: ${stem2} ✓ ${md}${ext2}`;
+      } catch (e) { return "\n(Couldn't mark the original file.)"; }
     }
 
     async function putFile(owner, repo, token, path, contentB64, message) {
@@ -561,27 +585,10 @@
                                  `Add image for ${folder}`);
         if (!ri.ok) throw new Error("Photo upload failed " + ri.status + ": " + (await ri.text()).slice(0, 200));
 
-        let markNote = "";
-        if (FS_SUPPORTED && pickedFileHandle && pickedFileHandle.move) {
-          try {
-            const perm = await pickedFileHandle.queryPermission({ mode: "readwrite" });
-            if (perm === "granted") {
-              const nm = pickedFile.name, dot = nm.lastIndexOf(".");
-              const stem2 = dot >= 0 ? nm.slice(0, dot) : nm;
-              const ext2 = dot >= 0 ? nm.slice(dot) : "";
-              const md = date.slice(5, 7) + "-" + date.slice(8, 10);   // MM-DD of the scheduled date
-              if (!stem2.includes(" ✓ ")) {
-                await pickedFileHandle.move(`${stem2} ✓ ${md}${ext2}`);
-                markNote = `\nOriginal marked: ${stem2} ✓ ${md}${ext2}`;
-              }
-            } else {
-              markNote = "\n(Original not marked — file-edit permission wasn't granted.)";
-            }
-          } catch (e) { markNote = "\n(Couldn't mark the original file.)"; }
-        }
+        const markNote = await markOriginal(date);
         showMsg(`✓ Queued! Posts ${sched} Pacific to ${chosen.join(", ")}.\n` +
                 `Saved to ${folder}. It will post automatically — no other step needed.` + markNote, "ok");
-        if (FS_SUPPORTED) { pickedFile = null; pickedFileHandle = null; $("photoName").classList.add("hidden"); $("photoName").textContent = ""; }
+        if (FS_SUPPORTED) { pickedFile = null; pickedFileHandle = null; photoMarked = false; $("photoName").classList.add("hidden"); $("photoName").textContent = ""; }
         else { $("photo").value = ""; }
         $("caption").value = ""; $("tags").value = "";
         $("suggestion").classList.remove("show");
@@ -839,12 +846,12 @@
     async function prepareLinkedIn() {
       const cap = $("liCaption").value.trim();
       if (!cap) { showMsg("Write or suggest a LinkedIn caption first.", "err"); return; }
-      try {
-        await navigator.clipboard.writeText(cap);
-        showMsg("✓ Copied! Opening LinkedIn — click 'Start a post', paste (Ctrl/Cmd+V), attach this photo, and post. (LinkedIn's clock icon can schedule it.)", "ok");
-      } catch (e) {
-        showMsg("Couldn't auto-copy — select the LinkedIn text and copy it manually. Opening LinkedIn…", "err");
-      }
+      let copied = true;
+      try { await navigator.clipboard.writeText(cap); } catch (e) { copied = false; }
+      const markNote = await markOriginal($("date").value);
+      showMsg((copied
+        ? "✓ Copied! Opening LinkedIn — click 'Start a post', paste (Ctrl/Cmd+V), attach this photo, and post. (LinkedIn's clock icon can schedule it.)"
+        : "Couldn't auto-copy — select the LinkedIn text and copy it manually. Opening LinkedIn…") + markNote, "ok");
       window.open("https://www.linkedin.com/feed/?shareActive=true", "_blank", "noopener");
     }
 
@@ -1153,7 +1160,7 @@
     (function () {
       const now = new Date(), pad = n => String(n).padStart(2, "0");
       $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-      if (FS_SUPPORTED) { $("photo").classList.add("hidden"); $("photoPickBtn").classList.remove("hidden"); }
+      if (FS_SUPPORTED) { $("photo").classList.add("hidden"); $("photoPickBtn").classList.remove("hidden"); $("markFileWrap").classList.remove("hidden"); }
       initLock();
     })();
   </script>
