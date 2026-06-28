@@ -259,6 +259,16 @@
       <label><input type="checkbox" value="instagram"> Instagram</label>
       <label><input type="checkbox" value="bluesky"> Bluesky</label>
       <label><input type="checkbox" value="mastodon"> Mastodon</label>
+      <label><input type="checkbox" value="flickr" onchange="toggleFlickr()"> Flickr</label>
+    </div>
+    <div id="flickrDetails" class="hidden" style="margin-top:10px">
+      <label for="flTitle">Flickr title (optional)</label>
+      <input type="text" id="flTitle" placeholder="Blank = use the caption's first line">
+      <label for="flAlbum">Album (optional)</label>
+      <input type="text" id="flAlbum" placeholder="Album name — created if it doesn't exist">
+      <label for="flGroups">Groups (optional)</label>
+      <input type="text" id="flGroups" placeholder="Comma-separated group names you've joined">
+      <div class="hint">Caption → Flickr description, hashtags → tags. Groups: only ones you've joined — add a few, not a blast.</div>
     </div>
     <div class="li-section">
       <button type="button" class="suggest-btn" style="width:100%"
@@ -485,6 +495,10 @@
         showMsg("Heads up: this photo is " + Math.round(file.size / 1048576) + " MB. Large files can be slow, and the auto-poster caps around 100 MB — consider a smaller export, or post this one manually.", "err");
       }
     }
+    function toggleFlickr() {
+      const cb = document.querySelector('.platforms input[value="flickr"]');
+      $("flickrDetails").classList.toggle("hidden", !(cb && cb.checked));
+    }
     async function pickPhotoFS() {
       try {
         const [handle] = await window.showOpenFilePicker({
@@ -566,12 +580,20 @@
       let ext = (file.name.match(/\.([^.]+)$/) || [, "jpg"])[1].toLowerCase();
 
       // Build post.yaml (schedule kept as a quoted string)
-      const yaml =
+      let yaml =
         `caption: ${JSON.stringify(caption)}\n` +
         `hashtags: [${tags.map(t => JSON.stringify(t)).join(", ")}]\n` +
         `platforms: [${chosen.map(p => JSON.stringify(p)).join(", ")}]\n` +
         `type: feed\n` +
         `schedule: "${sched}"\n`;
+      if (chosen.includes("flickr")) {
+        const flTitle = $("flTitle").value.trim();
+        const flAlbum = $("flAlbum").value.trim();
+        const flGroups = $("flGroups").value.trim().split(",").map(s => s.trim()).filter(Boolean);
+        if (flTitle) yaml += `flickr_title: ${JSON.stringify(flTitle)}\n`;
+        if (flAlbum) yaml += `flickr_album: ${JSON.stringify(flAlbum)}\n`;
+        if (flGroups.length) yaml += `flickr_groups: [${flGroups.map(g => JSON.stringify(g)).join(", ")}]\n`;
+      }
 
       $("submitBtn").disabled = true;
       showMsg("Saving…", "ok");
@@ -603,6 +625,8 @@
         $("suggestion").classList.remove("show");
         $("hashSug").classList.remove("show");
         document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
+        $("flickrDetails").classList.add("hidden");
+        $("flTitle").value = ""; $("flAlbum").value = ""; $("flGroups").value = "";
       } catch (err) {
         showMsg("✗ " + err.message, "err");
       } finally {
