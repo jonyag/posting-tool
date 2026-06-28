@@ -282,9 +282,10 @@
              placeholder="Type to find your albums (or a new name to create one)">
       <datalist id="flAlbumList"></datalist>
       <label for="flGroups">Groups (optional)</label>
-      <input type="text" id="flGroups" placeholder="Tap your groups below (or type names, comma-separated)">
-      <div id="flGroupChips" style="margin-top:4px"></div>
-      <div class="hint">Caption → Flickr description, hashtags → tags. Tap the groups you've joined — use a few, not a blast.</div>
+      <input type="text" id="flGroups" placeholder="Chosen groups show here (or type names, comma-separated)">
+      <button type="button" class="suggest-btn" id="flGroupToggle" style="margin-top:6px" onclick="toggleGroupList()">See my groups ▸</button>
+      <div id="flGroupChips" class="hidden" style="margin-top:6px"></div>
+      <div class="hint">Tap a group to add it above — only ones you've joined, and use a few, not a blast.</div>
     </div>
     <div class="li-section">
       <button type="button" class="suggest-btn" style="width:100%"
@@ -295,7 +296,7 @@
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-28.2</div>
+    <div class="ver">build 2026-06-28.3</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -413,6 +414,11 @@
       if (i >= 0) { cur.splice(i, 1); el.classList.remove("added"); }
       else { cur.push(name); el.classList.add("added"); }
       input.value = cur.join(", ");
+    }
+
+    function toggleGroupList() {
+      const nowHidden = $("flGroupChips").classList.toggle("hidden");
+      $("flGroupToggle").textContent = nowHidden ? "See my groups ▸" : "Hide groups ▾";
     }
     function initLock() {
       if (LS.getItem("pin_hash")) {
