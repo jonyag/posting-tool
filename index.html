@@ -32,6 +32,7 @@
       width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
     textarea { min-height: 185px; resize: vertical; }
     .hint { color: #888; font-size: 13px; margin-top: 4px; }
+    .ver { text-align: center; color: #c4c4c4; font-size: 11px; margin-top: 26px; }
     /* Caption suggestion */
     .caption-head { display: flex; align-items: center; justify-content: space-between; }
     .suggest-btn { background: #eef2f6; color: var(--accent); border: 1px solid var(--line);
@@ -281,8 +282,9 @@
              placeholder="Type to find your albums (or a new name to create one)">
       <datalist id="flAlbumList"></datalist>
       <label for="flGroups">Groups (optional)</label>
-      <input type="text" id="flGroups" placeholder="Comma-separated group names you've joined">
-      <div class="hint">Caption → Flickr description, hashtags → tags. Groups: only ones you've joined — add a few, not a blast.</div>
+      <input type="text" id="flGroups" placeholder="Tap your groups below (or type names, comma-separated)">
+      <div id="flGroupChips" style="margin-top:4px"></div>
+      <div class="hint">Caption → Flickr description, hashtags → tags. Tap the groups you've joined — use a few, not a blast.</div>
     </div>
     <div class="li-section">
       <button type="button" class="suggest-btn" style="width:100%"
@@ -293,6 +295,7 @@
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
+    <div class="ver">build 2026-06-28.2</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -366,22 +369,50 @@
     function unlock() {
       $("lock").classList.add("hidden");
       refreshTokenState();
-      loadFlickrAlbums();
+      loadFlickrMeta();
       if (!LS.getItem("gh_token")) openSettings();   // nudge first-time setup
     }
 
-    // Pull the saved Flickr album list into the album field's autocomplete.
-    async function loadFlickrAlbums() {
+    // Pull the saved Flickr album + group lists (album autocomplete + tappable group chips).
+    let flickrGroupsList = [];
+    async function loadFlickrMeta() {
       if (!LS.getItem("gh_token")) return;
       try {
-        const r = await ghGet("contents/flickr_albums.json", true);
+        const r = await ghGet("contents/flickr_meta.json", true);
         if (!r.ok) return;
-        const albums = JSON.parse(await r.text());
+        const meta = JSON.parse(await r.text());
         const dl = $("flAlbumList");
-        if (!dl) return;
-        dl.innerHTML = "";
-        (albums || []).forEach(a => { const o = document.createElement("option"); o.value = a; dl.appendChild(o); });
+        if (dl) {
+          dl.innerHTML = "";
+          (meta.albums || []).forEach(a => { const o = document.createElement("option"); o.value = a; dl.appendChild(o); });
+        }
+        flickrGroupsList = meta.groups || [];
+        renderGroupChips();
       } catch (e) {}
+    }
+
+    function renderGroupChips() {
+      const box = $("flGroupChips");
+      if (!box) return;
+      const current = $("flGroups").value.split(",").map(s => s.trim().toLowerCase());
+      box.innerHTML = "";
+      flickrGroupsList.forEach(g => {
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = "hash-chip" + (current.includes(g.toLowerCase()) ? " added" : "");
+        el.textContent = g;
+        el.onclick = () => toggleGroupChip(g, el);
+        box.appendChild(el);
+      });
+    }
+
+    function toggleGroupChip(name, el) {
+      const input = $("flGroups");
+      const cur = input.value.split(",").map(s => s.trim()).filter(Boolean);
+      const i = cur.findIndex(g => g.toLowerCase() === name.toLowerCase());
+      if (i >= 0) { cur.splice(i, 1); el.classList.remove("added"); }
+      else { cur.push(name); el.classList.add("added"); }
+      input.value = cur.join(", ");
     }
     function initLock() {
       if (LS.getItem("pin_hash")) {
@@ -532,6 +563,7 @@
     function toggleFlickr() {
       const cb = document.querySelector('.platforms input[value="flickr"]');
       $("flickrDetails").classList.toggle("hidden", !(cb && cb.checked));
+      renderGroupChips();
     }
     async function pickPhotoFS() {
       try {
@@ -1199,6 +1231,7 @@
       $("flTitle").value = p.flickr_title || "";
       $("flAlbum").value = p.flickr_album || "";
       $("flGroups").value = (p.flickr_groups || []).join(", ");
+      renderGroupChips();
       if (p.date) {
         $("date").value = `${p.date.getFullYear()}-${pad(p.date.getMonth() + 1)}-${pad(p.date.getDate())}`;
         $("time").value = `${pad(p.date.getHours())}:${pad(p.date.getMinutes())}`;
