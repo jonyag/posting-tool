@@ -315,14 +315,16 @@
     </div>
 
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
-    <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:22px;flex-wrap:wrap">
+    <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:22px;flex-wrap:wrap;align-items:center">
+      <button type="button" class="suggest-btn" id="cancelPostBtn" style="margin-right:auto"
+              onclick="cancelPost()">✕ Cancel</button>
       <button type="button" class="primary" id="draftBtn" style="float:none;margin-top:0;background:#6b7a89"
               onclick="saveDraft(event)">💾 Save as draft</button>
       <button type="submit" class="primary" id="submitBtn" style="float:none;margin-top:0">Add to Queue</button>
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-30.3</div>
+    <div class="ver">build 2026-06-30.4</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -1407,6 +1409,21 @@
       $("caption").value = "";
       $("suggestion").classList.remove("show");
       $("caption").focus();
+    }
+
+    // Cancel whatever you're composing (new post, reuse, or edit) and clear the form.
+    // Nothing is ever saved until you tap Add to Queue / Save as draft, so this just discards.
+    function cancelPost() {
+      const hasContent = getSelectedFile() || $("caption").value.trim() || $("tags").value.trim()
+        || document.querySelectorAll(".platforms input:checked").length;
+      if (hasContent && !confirm("Cancel this post and clear the form? Nothing has been saved.")) return;
+      resetEditMode();   // drops edit/draft/reuse state
+      clearForm();       // clears photo, caption, hashtags, platforms, Flickr fields
+      const now = new Date(), pad = n => String(n).padStart(2, "0");
+      $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      $("time").value = "12:00";
+      window.scrollTo(0, 0);
+      showMsg("Cancelled — the form is cleared. Nothing was saved.", "ok");
     }
 
     function setReusedPhotoLabel(text) {
