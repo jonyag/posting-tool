@@ -271,7 +271,6 @@
     <div class="platforms">
       <label><input type="checkbox" value="facebook"> Facebook</label>
       <label><input type="checkbox" value="instagram"> Instagram</label>
-      <label><input type="checkbox" value="threads"> Threads</label>
       <label><input type="checkbox" value="bluesky"> Bluesky</label>
       <label><input type="checkbox" value="mastodon"> Mastodon</label>
       <label><input type="checkbox" value="flickr" onchange="toggleFlickr()"> Flickr</label>
@@ -292,13 +291,15 @@
     <div class="li-section">
       <button type="button" class="suggest-btn" style="width:100%"
               onclick="prepareLinkedIn()">📋 Copy caption &amp; open LinkedIn</button>
-      <div class="hint" style="margin-top:6px">Uses the caption above — copies it and opens LinkedIn so you can paste, attach this photo, and post. Tip: pick an "Insight" style for that voice.</div>
+      <button type="button" class="suggest-btn" style="width:100%;margin-top:8px"
+              onclick="prepareThreads()">📋 Copy caption &amp; open Threads</button>
+      <div class="hint" style="margin-top:6px">Manual posts: copies the caption above and opens the site so you can paste, attach this photo, and post. (Threads pre-fills the text for you. LinkedIn: pick an "Insight" style for that voice.)</div>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
     <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-29.2</div>
+    <div class="ver">build 2026-06-29.3</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -911,6 +912,15 @@
         ? "✓ Copied! Opening LinkedIn — click 'Start a post', paste (Ctrl/Cmd+V), attach this photo, and post. (LinkedIn's clock icon can schedule it.)"
         : "Couldn't auto-copy — select the LinkedIn text and copy it manually. Opening LinkedIn…") + markNote, "ok");
       window.open("https://www.linkedin.com/feed/?shareActive=true", "_blank", "noopener");
+    }
+
+    async function prepareThreads() {
+      const cap = $("caption").value.trim();
+      if (!cap) { showMsg("Write or suggest a caption above first.", "err"); return; }
+      try { await navigator.clipboard.writeText(cap); } catch (e) {}
+      const markNote = await markOriginal($("date").value);
+      showMsg("✓ Opening Threads — the caption should be pre-filled (also copied as backup). Attach this photo and post." + markNote, "ok");
+      window.open("https://www.threads.net/intent/post?text=" + encodeURIComponent(cap), "_blank", "noopener");
     }
 
     // ---------- calendar / schedule view ----------
