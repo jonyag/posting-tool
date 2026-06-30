@@ -113,6 +113,20 @@
       .chip { font-size: 10px; padding: 1px 3px; }
       .cal-dow { font-size: 10px; }
     }
+    /* Drafts view */
+    .dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .dcard { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: pointer;
+      background: #fff; position: relative; display: flex; flex-direction: column; }
+    .dcard:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    .dcard img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: #f2f2f2; display: block; }
+    .dcard .dmeta { padding: 8px 10px; font-size: 12px; color: #444; }
+    .dcard .dname { font-weight: 600; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dcard .dcap { color: #777; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden; }
+    .dcard .ddel { position: absolute; top: 6px; right: 6px; background: rgba(255,255,255,.92);
+      border: 1px solid var(--line); border-radius: 6px; font-size: 13px; line-height: 1; padding: 4px 6px;
+      cursor: pointer; color: #c0392b; }
+    .dempty { color: #888; font-size: 14px; padding: 20px 0; }
     /* Settings + PIN overlays */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35);
       display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
@@ -219,6 +233,7 @@
     <div class="subtitle">
       <span>Posting Tool</span>
       <span style="display:flex;gap:12px;align-items:center">
+        <button type="button" class="suggest-btn" title="Photos saved but not scheduled yet" onclick="openDrafts()">📝 Drafts</button>
         <button type="button" class="suggest-btn" title="See what's scheduled and posted" onclick="openCalendar()">📅 Calendar</button>
         <button type="button" class="gear" title="Settings" onclick="openSettings()">&#9881;</button>
       </span>
@@ -297,9 +312,14 @@
     </div>
 
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
-    <button type="submit" class="primary" id="submitBtn">Add to Queue</button>
+    <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:22px;flex-wrap:wrap">
+      <button type="button" class="primary" id="draftBtn" style="float:none;margin-top:0;background:#6b7a89"
+              onclick="saveDraft(event)">💾 Save as draft</button>
+      <button type="submit" class="primary" id="submitBtn" style="float:none;margin-top:0">Add to Queue</button>
+    </div>
+    <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-29.3</div>
+    <div class="ver">build 2026-06-30.1</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -320,6 +340,18 @@
     </div>
     <div class="cal-status" id="calStatus"></div>
     <div class="cal-grid" id="calGrid"></div>
+  </div>
+
+  <!-- Drafts view -->
+  <div class="calview hidden" id="draftsView">
+    <div class="cal-head">
+      <span class="cal-title">📝 Drafts</span>
+      <button class="cal-btn" onclick="loadDrafts().then(renderDrafts)">↻ Refresh</button>
+      <button class="cal-btn" onclick="closeDrafts()">✕ Close</button>
+    </div>
+    <div class="cal-legend">Finished photos saved but not scheduled yet. Tap one to pick it back up — add a date and tap <b>Add to Queue</b> to schedule it.</div>
+    <div class="cal-status" id="draftStatus"></div>
+    <div class="dgrid" id="draftGrid"></div>
   </div>
 
   <!-- Post detail -->
@@ -610,11 +642,13 @@
         const nm = pickedFile.name, dot = nm.lastIndexOf(".");
         const stem2 = dot >= 0 ? nm.slice(0, dot) : nm;
         const ext2 = dot >= 0 ? nm.slice(dot) : "";
-        if (stem2.includes(" ✓ ")) { photoMarked = true; return ""; }
-        const md = (dateStr || "").slice(5, 7) + "-" + (dateStr || "").slice(8, 10);
-        await pickedFileHandle.move(`${stem2} ✓ ${md}${ext2}`);
+        if (stem2.includes(" ✓")) { photoMarked = true; return ""; }
+        // With a date -> "✓ MM-DD"; for a draft (no date yet) -> just "✓".
+        const md = dateStr ? dateStr.slice(5, 7) + "-" + dateStr.slice(8, 10) : "";
+        const mark = md ? ` ✓ ${md}` : " ✓";
+        await pickedFileHandle.move(`${stem2}${mark}${ext2}`);
         photoMarked = true;
-        return `\nOriginal marked: ${stem2} ✓ ${md}${ext2}`;
+        return `\nOriginal marked: ${stem2}${mark}${ext2}`;
       } catch (e) { return "\n(Couldn't mark the original file.)"; }
     }
 
@@ -1225,7 +1259,7 @@
         `hashtags: [${tags.map(t => JSON.stringify(t)).join(", ")}]\n` +
         `platforms: [${chosen.map(p => JSON.stringify(p)).join(", ")}]\n` +
         `type: feed\n` +
-        `schedule: "${sched}"\n`;
+        (sched ? `schedule: "${sched}"\n` : ``);   // drafts have no schedule
       if (chosen.includes("flickr")) {
         const flTitle = $("flTitle").value.trim();
         const flAlbum = $("flAlbum").value.trim();
@@ -1260,6 +1294,7 @@
       $("editBannerText").textContent = `Editing "${name}" — the photo stays the same. Change anything, then Save changes.`;
       $("editBanner").classList.remove("hidden");
       $("submitBtn").textContent = "Save changes";
+      $("draftBtn").classList.add("hidden");   // can't turn a scheduled post back into a draft here
       $("postDetail").classList.add("hidden");
       closeCalendar();
       window.scrollTo(0, 0);
@@ -1269,6 +1304,7 @@
     function resetEditMode() {
       editing = null;
       $("submitBtn").textContent = "Add to Queue";
+      $("draftBtn").classList.remove("hidden");
       $("editBanner").classList.add("hidden");
       $("caption").value = ""; $("tags").value = "";
       document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
@@ -1283,6 +1319,7 @@
     async function saveEdit(e) {
       if (e) e.preventDefault();
       if (!editing) return;
+      if (editing.isDraft) return promoteDraft();   // a draft gets scheduled = moved into the queue
       if (!LS.getItem("gh_token")) { openSettings(); return; }
       const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
       if (!chosen.length) { showMsg("Pick at least one platform.", "err"); return; }
@@ -1306,6 +1343,289 @@
       } finally {
         $("submitBtn").disabled = !LS.getItem("gh_token");
       }
+    }
+
+    // ---------- drafts ----------
+    // A draft = a saved post with NO schedule, stored under drafts/ which the poster never
+    // scans, so it can't go out by accident. Finish it later → it moves into queue/.
+    let draftsData = [];
+
+    function blobToB64(blob) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(blob);
+      });
+    }
+
+    async function deleteFile(path, sha, message) {
+      const owner = LS.getItem("gh_owner") || "jonyag";
+      const repo = LS.getItem("gh_repo") || "social-autopost";
+      const url = `https://api.github.com/repos/${owner}/${repo}/contents/` +
+        path.split("/").map(encodeURIComponent).join("/");
+      return fetch(url, {
+        method: "DELETE",
+        headers: {
+          "Authorization": "Bearer " + LS.getItem("gh_token"),
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({ message, sha }),
+      });
+    }
+
+    // Reset the compose form after a save (shared by Add to Queue + Save as draft).
+    function clearForm() {
+      if (FS_SUPPORTED) {
+        pickedFile = null; pickedFileHandle = null; photoMarked = false;
+        $("photoName").classList.add("hidden"); $("photoName").textContent = "";
+      } else { $("photo").value = ""; }
+      $("caption").value = ""; $("tags").value = "";
+      $("suggestion").classList.remove("show");
+      $("hashSug").classList.remove("show");
+      document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
+      $("flickrDetails").classList.add("hidden");
+      $("flTitle").value = ""; $("flAlbum").value = ""; $("flGroups").value = "";
+    }
+
+    // Save as draft. New photo → create a drafts/ folder; editing a draft → update it in place.
+    async function saveDraft(e) {
+      if (e) e.preventDefault();
+      const token = LS.getItem("gh_token");
+      const owner = LS.getItem("gh_owner") || "jonyag";
+      const repo = LS.getItem("gh_repo") || "social-autopost";
+      if (!token) { openSettings(); return; }
+      if (editing && editing.isDraft) return saveDraftEdit();
+
+      const file = getSelectedFile();
+      if (!file) { showMsg("Choose a photo first to save a draft.", "err"); return; }
+      if (file.size > 100 * 1024 * 1024) {
+        showMsg("This photo is " + Math.round(file.size / 1048576) + " MB — too large to auto-post (≈100 MB limit). Use a smaller export.", "err");
+        return;
+      }
+      const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
+      const caption = $("caption").value.trim();
+      const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
+      const stem = file.name.replace(/\.[^.]+$/, "");
+      const ext = (file.name.match(/\.([^.]+)$/) || [, "jpg"])[1].toLowerCase();
+      const yaml = buildPostYaml(caption, tags, chosen, null);   // no schedule
+
+      $("draftBtn").disabled = true;
+      showMsg("Saving draft…", "ok");
+      try {
+        const imgB64 = await readFileB64(file);
+        const base = slug(stem);
+        let folder = null, lastErr = "";
+        for (const suf of ["", "-2", "-3", "-4", "-5"]) {
+          const cand = `drafts/${base}${suf}`;
+          const r = await putFile(owner, repo, token, `${cand}/post.yaml`, utf8b64(yaml), `Add draft ${base}${suf}`);
+          if (r.ok) { folder = cand; break; }
+          if (r.status === 401) throw new Error("Token rejected (401). Check it in Settings.");
+          if (r.status === 404) throw new Error("Repo not found (404). Check owner/repo in Settings.");
+          if (r.status === 422 || r.status === 409) { lastErr = "name taken"; continue; }
+          throw new Error("GitHub error " + r.status + ": " + (await r.text()).slice(0, 200));
+        }
+        if (!folder) throw new Error("Couldn't create a unique folder. " + lastErr);
+        const ri = await putFile(owner, repo, token, `${folder}/image.${ext}`, imgB64, `Add image for ${folder}`);
+        if (!ri.ok) throw new Error("Photo upload failed " + ri.status + ": " + (await ri.text()).slice(0, 200));
+
+        const markNote = await markOriginal("");   // ✓ only, no date
+        showMsg(`✓ Saved as draft. Finish it anytime from 📝 Drafts — add a date there and Add to Queue to schedule it.` + markNote, "ok");
+        clearForm();
+      } catch (err) {
+        showMsg("✗ " + err.message, "err");
+      } finally {
+        $("draftBtn").disabled = false;
+      }
+    }
+
+    // Update an existing draft in place (keeps it a draft).
+    async function saveDraftEdit() {
+      const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
+      const caption = $("caption").value.trim();
+      const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
+      const yaml = buildPostYaml(caption, tags, chosen, null);
+      $("draftBtn").disabled = true;
+      showMsg("Saving draft…", "ok");
+      try {
+        const r = await putUpdate(editing.path.split("/").map(encodeURIComponent).join("/"),
+                                  editing.sha, utf8b64(yaml), `Edit draft ${editing.folder.split("/")[1]}`);
+        if (r.status === 409) throw new Error("This draft changed on GitHub — reopen 📝 Drafts and edit again.");
+        if (!r.ok) throw new Error("GitHub " + r.status + ": " + (await r.text()).slice(0, 150));
+        resetEditMode();
+        showMsg("✓ Draft saved.", "ok");
+      } catch (err) {
+        showMsg("✗ " + err.message, "err");
+      } finally {
+        $("draftBtn").disabled = !LS.getItem("gh_token");
+      }
+    }
+
+    // Schedule a draft: build queue/ folder from the draft (reusing its already-uploaded photo),
+    // then delete the draft. Called from saveEdit when editing.isDraft.
+    async function promoteDraft() {
+      const token = LS.getItem("gh_token");
+      const owner = LS.getItem("gh_owner") || "jonyag";
+      const repo = LS.getItem("gh_repo") || "social-autopost";
+      if (!token) { openSettings(); return; }
+      const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
+      if (!chosen.length) { showMsg("Pick at least one platform to schedule this.", "err"); return; }
+      const date = $("date").value, time = $("time").value;
+      if (!date || !time) { showMsg("Set a date and time to schedule this draft.", "err"); return; }
+      const sched = `${date} ${time}`;
+      const caption = $("caption").value.trim();
+      const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
+      const yaml = buildPostYaml(caption, tags, chosen, sched);
+
+      $("submitBtn").disabled = true;
+      showMsg("Scheduling…", "ok");
+      try {
+        if (!editing.imagePath) throw new Error("This draft has no photo on file — delete it and re-create it.");
+        const ir = await ghGet("contents/" + editing.imagePath.split("/").map(encodeURIComponent).join("/"), true);
+        if (!ir.ok) throw new Error("Couldn't read the draft photo (" + ir.status + ").");
+        const imgB64 = await blobToB64(await ir.blob());
+        const ext = (editing.imagePath.match(/\.([^.]+)$/) || [, "jpg"])[1].toLowerCase();
+        const base = editing.folder.split("/")[1];
+
+        let folder = null, lastErr = "";
+        for (const suf of ["", "-2", "-3", "-4", "-5"]) {
+          const cand = `queue/${base}${suf}`;
+          const r = await putFile(owner, repo, token, `${cand}/post.yaml`, utf8b64(yaml), `Schedule ${base}${suf} (from draft)`);
+          if (r.ok) { folder = cand; break; }
+          if (r.status === 401) throw new Error("Token rejected (401). Check it in Settings.");
+          if (r.status === 404) throw new Error("Repo not found (404). Check owner/repo in Settings.");
+          if (r.status === 422 || r.status === 409) { lastErr = "name taken"; continue; }
+          throw new Error("GitHub error " + r.status + ": " + (await r.text()).slice(0, 200));
+        }
+        if (!folder) throw new Error("Couldn't create a unique folder. " + lastErr);
+        const rq = await putFile(owner, repo, token, `${folder}/image.${ext}`, imgB64, `Add image for ${folder}`);
+        if (!rq.ok) throw new Error("Photo upload failed " + rq.status + ": " + (await rq.text()).slice(0, 200));
+
+        // Remove the original draft (post.yaml + image). Best-effort: the post is already queued.
+        try { await deleteFile(editing.path, editing.sha, `Remove draft ${base} (scheduled)`); } catch (e) {}
+        if (editing.imagePath && editing.imageSha) {
+          try { await deleteFile(editing.imagePath, editing.imageSha, `Remove draft image ${base}`); } catch (e) {}
+        }
+        resetEditMode();
+        showMsg(`✓ Scheduled! Posts ${sched} Pacific to ${chosen.join(", ")}. Moved out of drafts into the queue — it'll post automatically.`, "ok");
+      } catch (err) {
+        showMsg("✗ " + err.message, "err");
+      } finally {
+        $("submitBtn").disabled = !LS.getItem("gh_token");
+      }
+    }
+
+    async function openDrafts() {
+      if (!LS.getItem("gh_token")) { showMsg("Add your GitHub token in Settings first.", "err"); openSettings(); return; }
+      $("draftsView").classList.remove("hidden");
+      await loadDrafts();
+      renderDrafts();
+    }
+    function closeDrafts() { $("draftsView").classList.add("hidden"); }
+
+    async function loadDrafts() {
+      $("draftStatus").textContent = "Loading…";
+      draftsData = [];
+      try {
+        const branch = await getBranch();
+        const r = await ghGet(`git/trees/${branch}?recursive=1`);
+        if (r.status === 409) { $("draftStatus").textContent = "No drafts yet."; return; }
+        if (!r.ok) throw new Error("Couldn't read the repo (" + r.status + ").");
+        const tree = (await r.json()).tree || [];
+        const yamls = tree.filter(t => t.type === "blob" && /^drafts\/[^/]+\/post\.ya?ml$/.test(t.path));
+        const imgs = tree.filter(t => t.type === "blob" && /^drafts\/[^/]+\/[^/]+\.(jpe?g|png|gif|webp)$/i.test(t.path));
+        const imgByFolder = {}, imgShaByFolder = {};
+        for (const im of imgs) {
+          const f = im.path.split("/").slice(0, 2).join("/");
+          imgByFolder[f] = im.path; imgShaByFolder[f] = im.sha;
+        }
+        const out = await Promise.all(yamls.map(async y => {
+          try {
+            const cr = await ghGet("contents/" + y.path.split("/").map(encodeURIComponent).join("/"), true);
+            if (!cr.ok) return null;
+            const p = parsePost(await cr.text());
+            const folder = y.path.split("/").slice(0, 2).join("/");
+            return { folder, yamlPath: y.path, yamlSha: y.sha,
+                     imagePath: imgByFolder[folder] || null, imageSha: imgShaByFolder[folder] || null, ...p };
+          } catch (e) { return null; }
+        }));
+        draftsData = out.filter(Boolean);
+        $("draftStatus").textContent = draftsData.length
+          ? `${draftsData.length} draft${draftsData.length > 1 ? "s" : ""}`
+          : "No drafts yet — save one from the form with 💾 Save as draft.";
+      } catch (err) { $("draftStatus").textContent = "✗ " + err.message; }
+    }
+
+    function renderDrafts() {
+      const grid = $("draftGrid"); grid.innerHTML = "";
+      if (!draftsData.length) {
+        grid.innerHTML = `<div class="dempty">Nothing here yet. On the form, pick a finished photo and tap 💾 Save as draft — it'll wait here until you're ready to schedule it.</div>`;
+        return;
+      }
+      draftsData.forEach((d, idx) => {
+        const name = d.folder.split("/")[1];
+        const card = document.createElement("div");
+        card.className = "dcard";
+        card.onclick = () => openDraft(idx);
+        const img = document.createElement("img");
+        img.alt = name; img.loading = "lazy";
+        card.appendChild(img);
+        const meta = document.createElement("div"); meta.className = "dmeta";
+        const dn = document.createElement("div"); dn.className = "dname"; dn.textContent = name;
+        const dc = document.createElement("div"); dc.className = "dcap";
+        dc.textContent = d.caption || ((d.platforms && d.platforms.length) ? "→ " + d.platforms.join(", ") : "No caption yet");
+        meta.appendChild(dn); meta.appendChild(dc); card.appendChild(meta);
+        const del = document.createElement("button");
+        del.type = "button"; del.className = "ddel"; del.textContent = "🗑"; del.title = "Delete draft";
+        del.onclick = (e) => { e.stopPropagation(); deleteDraft(idx); };
+        card.appendChild(del);
+        grid.appendChild(card);
+        if (d.imagePath) {
+          ghGet("contents/" + d.imagePath.split("/").map(encodeURIComponent).join("/"), true)
+            .then(async ir => { if (ir.ok) img.src = URL.createObjectURL(await ir.blob()); })
+            .catch(() => {});
+        }
+      });
+    }
+
+    // Load a draft back into the compose form to finish it.
+    function openDraft(idx) {
+      const d = draftsData[idx];
+      if (!d) return;
+      editing = { folder: d.folder, path: d.yamlPath, sha: d.yamlSha, isDraft: true,
+                  imagePath: d.imagePath, imageSha: d.imageSha };
+      $("caption").value = d.caption || "";
+      $("tags").value = (d.hashtags || []).join(" ");
+      document.querySelectorAll(".platforms input").forEach(c => {
+        c.checked = (d.platforms || []).map(x => x.toLowerCase()).includes(c.value);
+      });
+      toggleFlickr();
+      $("flTitle").value = d.flickr_title || "";
+      $("flAlbum").value = d.flickr_album || "";
+      $("flGroups").value = (d.flickr_groups || []).join(", ");
+      renderGroupChips();
+      const name = d.folder.split("/")[1];
+      $("editBannerText").textContent = `Finishing draft "${name}" — the photo stays the same. Add a date + platforms, then Add to Queue to schedule it (or Save as draft to keep editing later).`;
+      $("editBanner").classList.remove("hidden");
+      $("submitBtn").textContent = "Add to Queue";
+      $("draftBtn").classList.remove("hidden");
+      closeDrafts();
+      window.scrollTo(0, 0);
+      showMsg("Finishing a draft. Add a date and tap Add to Queue to schedule it — or Save as draft to keep it waiting.", "ok");
+    }
+
+    async function deleteDraft(idx) {
+      const d = draftsData[idx];
+      if (!d) return;
+      if (!confirm(`Delete the draft "${d.folder.split("/")[1]}"? This can't be undone.`)) return;
+      $("draftStatus").textContent = "Deleting…";
+      try {
+        await deleteFile(d.yamlPath, d.yamlSha, `Delete draft ${d.folder.split("/")[1]}`);
+        if (d.imagePath && d.imageSha) await deleteFile(d.imagePath, d.imageSha, `Delete draft image ${d.folder.split("/")[1]}`);
+        await loadDrafts();
+        renderDrafts();
+      } catch (err) { $("draftStatus").textContent = "✗ " + err.message; }
     }
 
     // ---------- init ----------
