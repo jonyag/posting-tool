@@ -322,7 +322,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-30.2</div>
+    <div class="ver">build 2026-06-30.3</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -627,6 +627,15 @@
           } }],
         });
         pickedFileHandle = handle;
+        // Ask for edit permission NOW, while the picker still gives us user-activation.
+        // (Later, after the upload's network calls, the activation is gone and the browser
+        // would silently refuse — which is why marking a draft's original was failing.)
+        try {
+          if (handle.requestPermission) {
+            let perm = await handle.queryPermission({ mode: "readwrite" });
+            if (perm !== "granted") await handle.requestPermission({ mode: "readwrite" });
+          }
+        } catch (e) { /* user can still post; just won't be able to mark */ }
         pickedFile = await handle.getFile();
         reusedFile = null;                  // a freshly chosen local file wins
         photoMarked = false;
