@@ -254,7 +254,10 @@
 
     <div class="caption-head">
       <label for="caption" style="margin-bottom:0">Caption</label>
-      <button type="button" class="suggest-btn" id="suggestBtn" onclick="suggestCaption()">✨ Suggest caption</button>
+      <span style="display:flex;gap:8px">
+        <button type="button" class="suggest-btn" id="clearCapBtn" onclick="clearCaption()" title="Clear the caption and start fresh">✕ Clear</button>
+        <button type="button" class="suggest-btn" id="suggestBtn" onclick="suggestCaption()">✨ Suggest caption</button>
+      </span>
     </div>
     <textarea id="caption" placeholder="Write your caption here, or tap ✨ Suggest caption above…"></textarea>
     <div class="suggestion" id="suggestion">
@@ -319,7 +322,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-30.1</div>
+    <div class="ver">build 2026-06-30.2</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -379,6 +382,7 @@
     const LS = localStorage;
     const FS_SUPPORTED = "showOpenFilePicker" in window;   // Chromium desktop: lets us mark (rename) the original
     let pickedFile = null, pickedFileHandle = null, photoMarked = false;
+    let reusedFile = null;   // a photo pulled back from GitHub (reuse a posted photo, or a draft's photo for AI)
     async function sha256(t) {
       const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
       return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
@@ -593,11 +597,16 @@
     // Photo selection: native input on phones/unsupported browsers; file picker (with a
     // handle, so we can mark the original) on Chromium desktop.
     function onPhotoInputChange() {
+      reusedFile = null;                    // a freshly chosen local file wins
+      $("photoName").classList.add("hidden"); $("photoName").textContent = "";
       $("suggestion").classList.remove("show");
       $("hashSug").classList.remove("show");
       warnIfLarge($("photo").files[0]);
     }
-    function getSelectedFile() { return FS_SUPPORTED ? pickedFile : $("photo").files[0]; }
+    function getSelectedFile() {
+      if (reusedFile) return reusedFile;    // photo pulled back from GitHub (reuse / draft)
+      return FS_SUPPORTED ? pickedFile : $("photo").files[0];
+    }
     function warnIfLarge(file) {
       if (file && file.size > 50 * 1024 * 1024) {
         showMsg("Heads up: this photo is " + Math.round(file.size / 1048576) + " MB. Large files can be slow, and the auto-poster caps around 100 MB — consider a smaller export, or post this one manually.", "err");
@@ -619,6 +628,7 @@
         });
         pickedFileHandle = handle;
         pickedFile = await handle.getFile();
+        reusedFile = null;                  // a freshly chosen local file wins
         photoMarked = false;
         $("photoName").textContent = "📷 " + pickedFile.name;
         $("photoName").classList.remove("hidden");
@@ -718,14 +728,7 @@
         const markNote = await markOriginal(date);
         showMsg(`✓ Queued! Posts ${sched} Pacific to ${chosen.join(", ")}.\n` +
                 `Saved to ${folder}. It will post automatically — no other step needed.` + markNote, "ok");
-        if (FS_SUPPORTED) { pickedFile = null; pickedFileHandle = null; photoMarked = false; $("photoName").classList.add("hidden"); $("photoName").textContent = ""; }
-        else { $("photo").value = ""; }
-        $("caption").value = ""; $("tags").value = "";
-        $("suggestion").classList.remove("show");
-        $("hashSug").classList.remove("show");
-        document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
-        $("flickrDetails").classList.add("hidden");
-        $("flTitle").value = ""; $("flAlbum").value = ""; $("flGroups").value = "";
+        clearForm();
       } catch (err) {
         showMsg("✗ " + err.message, "err");
       } finally {
@@ -1238,6 +1241,7 @@
       if (p.status === "queued") {
         html += `<button class="primary" style="float:none;width:100%;margin-top:14px" onclick="editPost(${idx})">✏️ Edit this post</button>`;
       }
+      html += `<button class="primary" style="float:none;width:100%;margin-top:10px;background:#6b7a89" onclick="reusePhoto(${idx})">♻️ Reuse this photo in a new post</button>`;
       $("pdBody").innerHTML = html;
       const img = $("pdImg");
       img.style.display = "none"; img.removeAttribute("src");
@@ -1303,6 +1307,8 @@
 
     function resetEditMode() {
       editing = null;
+      reusedFile = null;
+      $("photoName").classList.add("hidden"); $("photoName").textContent = "";
       $("submitBtn").textContent = "Add to Queue";
       $("draftBtn").classList.remove("hidden");
       $("editBanner").classList.add("hidden");
@@ -1377,16 +1383,60 @@
 
     // Reset the compose form after a save (shared by Add to Queue + Save as draft).
     function clearForm() {
-      if (FS_SUPPORTED) {
-        pickedFile = null; pickedFileHandle = null; photoMarked = false;
-        $("photoName").classList.add("hidden"); $("photoName").textContent = "";
-      } else { $("photo").value = ""; }
+      pickedFile = null; pickedFileHandle = null; photoMarked = false; reusedFile = null;
+      $("photoName").classList.add("hidden"); $("photoName").textContent = "";
+      if (!FS_SUPPORTED) $("photo").value = "";
       $("caption").value = ""; $("tags").value = "";
       $("suggestion").classList.remove("show");
       $("hashSug").classList.remove("show");
       document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);
       $("flickrDetails").classList.add("hidden");
       $("flTitle").value = ""; $("flAlbum").value = ""; $("flGroups").value = "";
+    }
+
+    function clearCaption() {
+      $("caption").value = "";
+      $("suggestion").classList.remove("show");
+      $("caption").focus();
+    }
+
+    function setReusedPhotoLabel(text) {
+      $("photoName").textContent = "📷 " + text;
+      $("photoName").classList.remove("hidden");
+    }
+
+    // Pull a photo that's already in the repo back into memory as a File, so it can feed
+    // the normal post flow AND the AI suggestion calls (downscale works on any File).
+    async function fetchStoredPhoto(imagePath) {
+      const ir = await ghGet("contents/" + imagePath.split("/").map(encodeURIComponent).join("/"), true);
+      if (!ir.ok) throw new Error("Couldn't load that photo (" + ir.status + ").");
+      const blob = await ir.blob();
+      const baseName = (imagePath.split("/")[1] || "photo").replace(/^\d{4}-\d{2}-\d{2}-/, "") || "photo";
+      const ext = (imagePath.match(/\.([^.]+)$/) || [, "jpg"])[1].toLowerCase();
+      const type = blob.type || ("image/" + (ext === "jpg" ? "jpeg" : ext));
+      return new File([blob], `${baseName}.${ext}`, { type });
+    }
+
+    // Reuse a photo from a past/queued post in a brand-new post (no re-upload, original untouched).
+    async function reusePhoto(idx) {
+      const p = scheduleData[idx];
+      if (!p || !p.imagePath) { showMsg("No stored photo found for that post.", "err"); return; }
+      showMsg("Loading the photo…", "ok");
+      try {
+        const f = await fetchStoredPhoto(p.imagePath);
+        resetEditMode();                       // fresh new post, not an edit
+        reusedFile = f;
+        setReusedPhotoLabel((p.folder.split("/")[1]) + " — reused");
+        $("caption").value = p.caption || "";  // bring caption + hashtags as a starting point
+        $("tags").value = (p.hashtags || []).join(" ");
+        document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);  // pick the new site
+        $("flickrDetails").classList.add("hidden");
+        $("date").value = "";                   // pick a new date
+        $("postDetail").classList.add("hidden");
+        closeCalendar();
+        window.scrollTo(0, 0);
+        showMsg("♻️ Photo loaded into a new post. The caption came along — edit it, tap ✕ Clear to start fresh, or ✨ Suggest a new one. Then pick a date + site(s) and Add to Queue or Save as draft. (The original post is untouched.)", "ok");
+      } catch (err) { showMsg("✗ " + err.message, "err"); }
     }
 
     // Save as draft. New photo → create a drafts/ folder; editing a draft → update it in place.
@@ -1606,6 +1656,12 @@
       $("flGroups").value = (d.flickr_groups || []).join(", ");
       renderGroupChips();
       const name = d.folder.split("/")[1];
+      // Pull the draft's photo back so ✨ Suggest works while finishing it.
+      reusedFile = null;
+      if (d.imagePath) {
+        setReusedPhotoLabel(name + " — draft photo");
+        fetchStoredPhoto(d.imagePath).then(f => { reusedFile = f; }).catch(() => {});
+      }
       $("editBannerText").textContent = `Finishing draft "${name}" — the photo stays the same. Add a date + platforms, then Add to Queue to schedule it (or Save as draft to keep editing later).`;
       $("editBanner").classList.remove("hidden");
       $("submitBtn").textContent = "Add to Queue";
