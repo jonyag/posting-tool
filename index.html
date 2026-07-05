@@ -201,6 +201,10 @@
         <button type="button" class="cal-btn" style="width:100%;margin-top:8px" onclick="turnOffBiometric()">Turn off biometric unlock</button>
       </div>
       <div class="hint" id="bioMsg"></div>
+      <label style="font-weight:500;margin-top:14px;display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="setSkipLock"> Skip the lock on THIS device (open with no PIN / Face ID)
+      </label>
+      <div class="hint">Fine on your personal, login-protected PC. Leave it OFF on your phone. This choice is per-device.</div>
 
       <button class="primary" style="float:none;width:100%;margin-top:18px" onclick="saveSettings()">
         Save
@@ -324,7 +328,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-06-30.4</div>
+    <div class="ver">build 2026-06-30.5</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -563,6 +567,7 @@
       $("setAiModel").value = LS.getItem("ai_model") || "claude-opus-4-8";
       $("setVoice").value = LS.getItem("voice_samples") || "";
       $("setNiche").value = LS.getItem("niche") || "";
+      $("setSkipLock").checked = !!LS.getItem("skip_lock");
       $("settings").classList.remove("hidden");
       refreshBioUI();
     }
@@ -574,6 +579,7 @@
       LS.setItem("ai_model", $("setAiModel").value || "claude-opus-4-8");
       LS.setItem("voice_samples", $("setVoice").value.trim());
       LS.setItem("niche", $("setNiche").value.trim());
+      if ($("setSkipLock").checked) LS.setItem("skip_lock", "1"); else LS.removeItem("skip_lock");
       $("settings").classList.add("hidden");
       refreshTokenState();
     }
@@ -1715,7 +1721,8 @@
       const now = new Date(), pad = n => String(n).padStart(2, "0");
       $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       if (FS_SUPPORTED) { $("photo").classList.add("hidden"); $("photoPickBtn").classList.remove("hidden"); $("markFileWrap").classList.remove("hidden"); }
-      initLock();
+      if (LS.getItem("skip_lock")) unlock();   // this device opted out of the lock screen
+      else initLock();
     })();
   </script>
 </body>
