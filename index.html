@@ -286,7 +286,7 @@
 
     <div class="row">
       <div><label for="date">Date</label><input type="date" id="date"></div>
-      <div><label for="time">Time</label><input type="time" id="time" value="12:00"></div>
+      <div><label for="time">Time</label><input type="time" id="time"></div>
     </div>
     <button type="button" class="suggest-btn" style="margin-top:8px" onclick="openCalendar(true)">📅 Pick date on calendar</button>
 
@@ -329,7 +329,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-05.1</div>
+    <div class="ver">build 2026-07-06.1</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -709,8 +709,10 @@
       }
       const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
       if (!chosen.length) { showMsg("Pick at least one platform.", "err"); return; }
-      const date = $("date").value, time = $("time").value;
-      if (!date || !time) { showMsg("Please set a date and time.", "err"); return; }
+      const date = $("date").value;
+      let time = $("time").value;
+      if (!date) { showMsg("Add a date to schedule this — or tap 💾 Save as draft to keep it undated for now.", "err"); return; }
+      if (!time) time = "12:00";
       const sched = `${date} ${time}`;
 
       const caption = $("caption").value.trim();
@@ -1011,6 +1013,7 @@
     function pickDate(d) {
       const pad = n => ("0" + n).slice(-2);
       $("date").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      onDateChange();   // fill noon if no time set yet
       closeCalendar();
       showMsg(`📅 Date set to ${$("date").value}${$("time").value ? " at " + $("time").value : ""}. Finish your post and click Add to Queue.`, "ok");
     }
@@ -1352,8 +1355,10 @@
       if (!LS.getItem("gh_token")) { openSettings(); return; }
       const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
       if (!chosen.length) { showMsg("Pick at least one platform.", "err"); return; }
-      const date = $("date").value, time = $("time").value;
-      if (!date || !time) { showMsg("Please set a date and time.", "err"); return; }
+      const date = $("date").value;
+      let time = $("time").value;
+      if (!date) { showMsg("Add a date to schedule this — or tap 💾 Save as draft to keep it undated for now.", "err"); return; }
+      if (!time) time = "12:00";
       const sched = `${date} ${time}`;
       const caption = $("caption").value.trim();
       const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
@@ -1473,9 +1478,7 @@
       if (hasContent && !confirm("Cancel this post and clear the form? Nothing has been saved.")) return;
       resetEditMode();   // drops edit/draft/reuse state
       clearForm();       // clears photo, caption, hashtags, platforms, Flickr fields
-      const now = new Date(), pad = n => String(n).padStart(2, "0");
-      $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-      $("time").value = "12:00";
+      $("date").value = ""; $("time").value = "";
       window.scrollTo(0, 0);
       showMsg("Cancelled — the form is cleared. Nothing was saved.", "ok");
     }
@@ -1483,6 +1486,11 @@
     function setReusedPhotoLabel(text) {
       $("photoName").textContent = "📷 " + text;
       $("photoName").classList.remove("hidden");
+    }
+
+    // Date + time start blank; picking a date auto-fills noon so he doesn't have to.
+    function onDateChange() {
+      if ($("date").value && !$("time").value) $("time").value = "12:00";
     }
 
     // Pull a photo that's already in the repo back into memory as a File, so it can feed
@@ -1511,7 +1519,7 @@
         $("tags").value = (p.hashtags || []).join(" ");
         document.querySelectorAll(".platforms input:checked").forEach(c => c.checked = false);  // pick the new site
         $("flickrDetails").classList.add("hidden");
-        $("date").value = "";                   // pick a new date
+        $("date").value = ""; $("time").value = "";   // pick a new date (time auto-fills noon)
         $("postDetail").classList.add("hidden");
         closeCalendar();
         window.scrollTo(0, 0);
@@ -1603,8 +1611,10 @@
       if (!token) { openSettings(); return; }
       const chosen = [...document.querySelectorAll(".platforms input:checked")].map(c => c.value);
       if (!chosen.length) { showMsg("Pick at least one platform to schedule this.", "err"); return; }
-      const date = $("date").value, time = $("time").value;
-      if (!date || !time) { showMsg("Set a date and time to schedule this draft.", "err"); return; }
+      const date = $("date").value;
+      let time = $("time").value;
+      if (!date) { showMsg("Add a date to schedule this draft — or tap 💾 Save as draft to keep it waiting undated.", "err"); return; }
+      if (!time) time = "12:00";
       const sched = `${date} ${time}`;
       const caption = $("caption").value.trim();
       const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
@@ -1738,6 +1748,7 @@
       $("flAlbum").value = d.flickr_album || "";
       $("flGroups").value = (d.flickr_groups || []).join(", ");
       renderGroupChips();
+      $("date").value = ""; $("time").value = "";   // draft is undated; add a date to schedule it
       const name = d.folder.split("/")[1];
       // Pull the draft's photo back so ✨ Suggest works while finishing it.
       reusedFile = null;
@@ -1770,8 +1781,8 @@
 
     // ---------- init ----------
     (function () {
-      const now = new Date(), pad = n => String(n).padStart(2, "0");
-      $("date").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      // Date + time start blank on purpose (drafts are undated); picking a date auto-fills noon.
+      $("date").addEventListener("change", onDateChange);
       if (FS_SUPPORTED) { $("photo").classList.add("hidden"); $("photoPickBtn").classList.remove("hidden"); $("markFileWrap").classList.remove("hidden"); }
       ["caption", "tags"].forEach(id => $(id).addEventListener("input", updateBskyWarn));
       document.querySelectorAll(".platforms input").forEach(cb => cb.addEventListener("change", updateBskyWarn));
