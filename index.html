@@ -295,7 +295,7 @@
     <label style="font-weight:500;margin-top:16px;display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="storyMode" onchange="toggleStoryMode()"> 📱 Make this a Story (Facebook / Instagram)
     </label>
-    <div class="hint hidden" id="storyHint">Stories are vertical 9:16 images. Upload a 9:16 photo (a builder to make one from any photo is coming next). Hashtags and tappable links aren't shown on a Story.</div>
+    <div class="hint hidden" id="storyHint">Stories are vertical 9:16. Upload a 9:16 photo <b>or a video</b> (e.g. from Canva). Hashtags and tappable links aren't shown on a Story.</div>
 
     <label>Post to</label>
     <div class="platforms">
@@ -336,7 +336,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-09.3</div>
+    <div class="ver">build 2026-07-09.4</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -648,16 +648,25 @@
       if (li) li.classList.toggle("hidden", on);
       if (on) $("flickrDetails").classList.add("hidden");
       $("storyHint").classList.toggle("hidden", !on);
+      $("photo").accept = on ? "image/*,video/*" : "image/*";   // videos allowed only for stories
       updateBskyWarn();
     }
+    function isVideoFile(f) {
+      return !!f && ((f.type && f.type.startsWith("video")) || /\.(mp4|mov)$/i.test(f.name || ""));
+    }
+    function isVideoPath(p) { return /\.(mp4|mov)$/i.test(p || ""); }
+
     async function pickPhotoFS() {
       try {
+        const imageTypes = {
+          "image/jpeg": [".jpg", ".jpeg"], "image/png": [".png"],
+          "image/gif": [".gif"], "image/webp": [".webp"],
+        };
+        const story = $("storyMode").checked;
+        const accept = story ? { ...imageTypes, "video/mp4": [".mp4"], "video/quicktime": [".mov"] } : imageTypes;
         const [handle] = await window.showOpenFilePicker({
           multiple: false,
-          types: [{ description: "Images", accept: {
-            "image/jpeg": [".jpg", ".jpeg"], "image/png": [".png"],
-            "image/gif": [".gif"], "image/webp": [".webp"],
-          } }],
+          types: [{ description: story ? "Images or video" : "Images", accept }],
         });
         pickedFileHandle = handle;
         // Ask for edit permission NOW, while the picker still gives us user-activation.
@@ -825,6 +834,7 @@
         openSettings(); return;
       }
       if (!getSelectedFile()) { showMsg("Choose a photo first, then I can suggest a caption for it.", "err"); return; }
+      if (isVideoFile(getSelectedFile())) { showMsg("AI captions read photos, not video files. (A Story doesn't show a caption anyway.)", "err"); return; }
       $("stylePicker").classList.remove("hidden");
     }
     function changeStyle() { $("stylePicker").classList.remove("hidden"); }
@@ -921,6 +931,7 @@
       }
       const file = getSelectedFile();
       if (!file) { showMsg("Choose a photo first, then I can suggest hashtags.", "err"); return; }
+      if (isVideoFile(file)) { showMsg("Hashtag suggestions read photos, not video files.", "err"); return; }
       const niche = (LS.getItem("niche") || "").trim();
       const btn = $("hashBtn"); const old = btn.textContent;
       btn.disabled = true; btn.textContent = "# Thinking…";
@@ -1301,11 +1312,12 @@
         html += `<button class="primary" style="float:none;width:100%;margin-top:14px" onclick="editPost(${idx})">✏️ Edit this post</button>`;
       }
       html += `<button class="primary" style="float:none;width:100%;margin-top:10px;background:#6b7a89" onclick="reusePhoto(${idx})">♻️ Reuse this photo in a new post</button>`;
+      if (isVideoPath(p.imagePath)) html = `<div class="detail-row" style="color:#3E5C76">🎬 <b>Video story</b></div>` + html;
       $("pdBody").innerHTML = html;
       const img = $("pdImg");
       img.style.display = "none"; img.removeAttribute("src");
       $("postDetail").classList.remove("hidden");
-      if (p.imagePath) {
+      if (p.imagePath && !isVideoPath(p.imagePath)) {
         try {
           const ir = await ghGet("contents/" + p.imagePath.split("/").map(encodeURIComponent).join("/"), true);
           if (ir.ok) { img.src = URL.createObjectURL(await ir.blob()); img.style.display = "block"; }
@@ -1549,6 +1561,7 @@
       try {
         const f = await fetchStoredPhoto(p.imagePath);
         resetEditMode();                       // fresh new post, not an edit
+        if (isVideoPath(p.imagePath)) { $("storyMode").checked = true; toggleStoryMode(); }  // video only works as a story
         reusedFile = f;
         setReusedPhotoLabel((p.folder.split("/")[1]) + " — reused");
         $("caption").value = p.caption || "";  // bring caption + hashtags as a starting point
@@ -1747,9 +1760,17 @@
         const card = document.createElement("div");
         card.className = "dcard";
         card.onclick = () => openDraft(idx);
-        const img = document.createElement("img");
-        img.alt = name; img.loading = "lazy";
-        card.appendChild(img);
+        let img = null;
+        if (isVideoPath(d.imagePath)) {
+          const ph = document.createElement("div");
+          ph.style.cssText = "width:100%;aspect-ratio:1/1;background:#2b2b2b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px";
+          ph.textContent = "🎬";
+          card.appendChild(ph);
+        } else {
+          img = document.createElement("img");
+          img.alt = name; img.loading = "lazy";
+          card.appendChild(img);
+        }
         const meta = document.createElement("div"); meta.className = "dmeta";
         const dn = document.createElement("div"); dn.className = "dname"; dn.textContent = name;
         const dc = document.createElement("div"); dc.className = "dcap";
@@ -1760,7 +1781,7 @@
         del.onclick = (e) => { e.stopPropagation(); deleteDraft(idx); };
         card.appendChild(del);
         grid.appendChild(card);
-        if (d.imagePath) {
+        if (img && d.imagePath) {
           ghGet("contents/" + d.imagePath.split("/").map(encodeURIComponent).join("/"), true)
             .then(async ir => { if (ir.ok) img.src = URL.createObjectURL(await ir.blob()); })
             .catch(() => {});
