@@ -336,7 +336,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-06.2</div>
+    <div class="ver">build 2026-07-09.1</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -605,7 +605,7 @@
       return new Promise((res, rej) => {
         const r = new FileReader();
         r.onload = () => res(r.result.split(",")[1]);   // strip data: prefix
-        r.onerror = rej;
+        r.onerror = () => rej(r.error || new Error("Couldn't read the photo — it may have been moved or renamed. Re-pick it and try again."));
         r.readAsDataURL(file);
       });
     }
@@ -700,6 +700,9 @@
         const mark = md ? ` ✓ ${md}` : " ✓";
         await pickedFileHandle.move(`${stem2}${mark}${ext2}`);
         photoMarked = true;
+        // Renaming invalidates the old File reference — refresh it so a later
+        // upload (e.g. Add to Queue after using the LinkedIn/Threads button) still reads.
+        try { pickedFile = await pickedFileHandle.getFile(); } catch (e) {}
         return `\nOriginal marked: ${stem2}${mark}${ext2}`;
       } catch (e) { return "\n(Couldn't mark the original file.)"; }
     }
@@ -1416,7 +1419,7 @@
       return new Promise((res, rej) => {
         const r = new FileReader();
         r.onload = () => res(r.result.split(",")[1]);
-        r.onerror = rej;
+        r.onerror = () => rej(r.error || new Error("Couldn't read the image data."));
         r.readAsDataURL(blob);
       });
     }
