@@ -323,7 +323,7 @@
               onclick="prepareLinkedIn()">📋 Copy caption &amp; open LinkedIn</button>
       <button type="button" class="suggest-btn" style="width:100%;margin-top:8px"
               onclick="prepareThreads()">📋 Copy caption &amp; open Threads</button>
-      <div class="hint" style="margin-top:6px">Manual posts: copies the caption above and opens the site so you can paste, attach this photo, and post. (Threads pre-fills the text for you. LinkedIn: pick an "Insight" style for that voice.)</div>
+      <div class="hint" style="margin-top:6px">Manual posts: copies the caption above and opens the site so you can paste, attach this photo, and post — both open the full composer so you can use their built-in scheduler. (LinkedIn: pick an "Insight" style for that voice.)</div>
     </div>
 
     <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
@@ -336,7 +336,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-09.1</div>
+    <div class="ver">build 2026-07-09.2</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -1004,10 +1004,16 @@
     async function prepareThreads() {
       const cap = $("caption").value.trim();
       if (!cap) { showMsg("Write or suggest a caption above first.", "err"); return; }
-      try { await navigator.clipboard.writeText(cap); } catch (e) {}
+      let copied = true;
+      try { await navigator.clipboard.writeText(cap); } catch (e) { copied = false; }
       const markNote = await markOriginal($("date").value);
-      showMsg("✓ Opening Threads — the caption should be pre-filled (also copied as backup). Attach this photo and post." + markNote, "ok");
-      window.open("https://www.threads.net/intent/post?text=" + encodeURIComponent(cap), "_blank", "noopener");
+      // Open the FULL Threads composer (not the intent/lite one) so the schedule clock
+      // is available. The lite composer pre-fills text but hides scheduling — so we copy
+      // the caption to the clipboard instead and you paste it.
+      showMsg((copied
+        ? "✓ Caption copied! Opening Threads — click 'New thread', paste (Ctrl/Cmd+V), attach this photo, then use the clock icon to schedule."
+        : "Couldn't auto-copy — copy your caption manually. Opening Threads…") + markNote, "ok");
+      window.open("https://www.threads.net/", "_blank", "noopener");
     }
 
     // ---------- calendar / schedule view ----------
