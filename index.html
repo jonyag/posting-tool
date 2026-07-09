@@ -336,7 +336,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-09.4</div>
+    <div class="ver">build 2026-07-09.5</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -1128,7 +1128,7 @@
         if (!r.ok) throw new Error("Couldn't read the repo (" + r.status + ").");
         const tree = (await r.json()).tree || [];
         const yamls = tree.filter(t => t.type === "blob" && /^(queue|posted)\/[^/]+\/post\.ya?ml$/.test(t.path));
-        const imgs = tree.filter(t => t.type === "blob" && /^(queue|posted)\/[^/]+\/[^/]+\.(jpe?g|png|gif|webp)$/i.test(t.path));
+        const imgs = tree.filter(t => t.type === "blob" && /^(queue|posted)\/[^/]+\/[^/]+\.(jpe?g|png|gif|webp|mp4|mov)$/i.test(t.path));
         const imgByFolder = {};
         for (const im of imgs) imgByFolder[im.path.split("/").slice(0, 2).join("/")] = im.path;
         const statsByFolder = {};
@@ -1208,8 +1208,10 @@
               eng = "  ❤" + ((typeof il === "number" ? il : 0) + (typeof fl === "number" ? fl : 0));
             }
           }
-          chip.textContent = t + " " + photoName + eng;
-          chip.title = photoName + (p.caption ? " — " + p.caption : "");
+          const marks = (p.type === "story" ? "📱" : "") + (isVideoPath(p.imagePath) ? "🎬" : "");
+          chip.textContent = t + " " + (marks ? marks + " " : "") + photoName + eng;
+          chip.title = (p.type === "story" ? "Story " : "") + (isVideoPath(p.imagePath) ? "(video) " : "")
+            + photoName + (p.caption ? " — " + p.caption : "");
           if (!calPickMode) {
             chip.onclick = () => openDetail(idx);
             if (p.status === "queued") {
@@ -1285,6 +1287,7 @@
       $("pdTitle").textContent = p.status === "queued" ? "🕓 Queued" : "✅ Posted";
       let html =
         `<div class="detail-row"><b>Photo:</b> ${esc(photoName)}</div>` +
+        `<div class="detail-row"><b>Type:</b> ${p.type === "story" ? "📱 Story" : "📸 Feed post"}${isVideoPath(p.imagePath) ? " · 🎬 Video" : ""}</div>` +
         `<div class="detail-row"><b>When:</b> ${esc(p.schedStr)} (Pacific)</div>` +
         `<div class="detail-row"><b>To:</b> ${esc((p.platforms || []).join(", ")) || "—"}</div>` +
         `<div class="detail-row"><b>Caption:</b> ${esc(p.caption) || "—"}</div>` +
@@ -1312,7 +1315,6 @@
         html += `<button class="primary" style="float:none;width:100%;margin-top:14px" onclick="editPost(${idx})">✏️ Edit this post</button>`;
       }
       html += `<button class="primary" style="float:none;width:100%;margin-top:10px;background:#6b7a89" onclick="reusePhoto(${idx})">♻️ Reuse this photo in a new post</button>`;
-      if (isVideoPath(p.imagePath)) html = `<div class="detail-row" style="color:#3E5C76">🎬 <b>Video story</b></div>` + html;
       $("pdBody").innerHTML = html;
       const img = $("pdImg");
       img.style.display = "none"; img.removeAttribute("src");
