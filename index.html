@@ -336,7 +336,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-09.5</div>
+    <div class="ver">build 2026-07-09.6</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -766,12 +766,12 @@
       try {
         const imgB64 = await readFileB64(file);
         const base = slug(stem);   // folder = photo name (no date prefix; the calendar is the schedule view)
-        let folder = null, lastErr = "";
+        let folder = null, lastErr = "", yamlSha = null;
         for (const suf of ["", "-2", "-3", "-4", "-5"]) {
           const cand = `queue/${base}${suf}`;
           const r = await putFile(owner, repo, token, `${cand}/post.yaml`, utf8b64(yaml),
                                   `Add post ${base}${suf}`);
-          if (r.ok) { folder = cand; break; }
+          if (r.ok) { folder = cand; try { yamlSha = (await r.json()).content.sha; } catch (e) {} break; }
           if (r.status === 401) throw new Error("Token rejected (401). Check it in Settings.");
           if (r.status === 404) throw new Error("Repo not found (404). Check owner/repo in Settings.");
           if (r.status === 422 || r.status === 409) { lastErr = "name taken"; continue; }
@@ -780,7 +780,13 @@
         if (!folder) throw new Error("Couldn't create a unique folder. " + lastErr);
         const ri = await putFile(owner, repo, token, `${folder}/image.${ext}`, imgB64,
                                  `Add image for ${folder}`);
-        if (!ri.ok) throw new Error("Photo upload failed " + ri.status + ": " + (await ri.text()).slice(0, 200));
+        if (!ri.ok) {
+          const detail = (await ri.text()).slice(0, 200);
+          // The post.yaml was already created — roll it back so we don't leave an
+          // image-less post stuck in the queue.
+          if (yamlSha) { try { await deleteFile(`${folder}/post.yaml`, yamlSha, `Roll back ${folder} (upload failed)`); } catch (e) {} }
+          throw new Error("Photo upload failed " + ri.status + ": " + detail + "\n(The empty post was removed — try a smaller export.)");
+        }
 
         const markNote = await markOriginal(date);
         showMsg(`✓ Queued! Posts ${sched} Pacific to ${chosen.join(", ")}.\n` +
@@ -1315,6 +1321,9 @@
         html += `<button class="primary" style="float:none;width:100%;margin-top:14px" onclick="editPost(${idx})">✏️ Edit this post</button>`;
       }
       html += `<button class="primary" style="float:none;width:100%;margin-top:10px;background:#6b7a89" onclick="reusePhoto(${idx})">♻️ Reuse this photo in a new post</button>`;
+      if (p.status === "queued") {
+        html += `<button class="primary" style="float:none;width:100%;margin-top:10px;background:#c0392b" onclick="deletePost(${idx})">🗑 Delete this post</button>`;
+      }
       $("pdBody").innerHTML = html;
       const img = $("pdImg");
       img.style.display = "none"; img.removeAttribute("src");
@@ -1325,6 +1334,29 @@
           if (ir.ok) { img.src = URL.createObjectURL(await ir.blob()); img.style.display = "block"; }
         } catch (e) {}
       }
+    }
+
+    // Delete a queued post entirely (change-of-mind, or clean up a broken/image-less one).
+    // Removes every file under the folder — even if the image failed to upload.
+    async function deletePost(idx) {
+      const p = scheduleData[idx];
+      if (!p) return;
+      const name = p.folder.split("/")[1];
+      if (!confirm(`Delete the scheduled post "${name}"? It won't post, and this can't be undone.`)) return;
+      setCalStatus(`Deleting "${name}"…`);
+      try {
+        const branch = await getBranch();
+        const r = await ghGet(`git/trees/${branch}?recursive=1`);
+        if (!r.ok) throw new Error("Couldn't read the repo (" + r.status + ").");
+        const tree = (await r.json()).tree || [];
+        const files = tree.filter(t => t.type === "blob" && t.path.startsWith(p.folder + "/"));
+        if (!files.length) throw new Error("Nothing left to delete — hit Refresh.");
+        for (const f of files) await deleteFile(f.path, f.sha, `Delete ${name}`);
+        $("postDetail").classList.add("hidden");
+        await loadSchedule();
+        renderMonth();
+        setCalStatus(`✓ Deleted "${name}".`);
+      } catch (err) { setCalStatus("✗ " + err.message); }
     }
 
     // ---------- edit a queued post (loads it back into the main form) ----------
