@@ -127,6 +127,17 @@
       border: 1px solid var(--line); border-radius: 6px; font-size: 13px; line-height: 1; padding: 4px 6px;
       cursor: pointer; color: #c0392b; }
     .dempty { color: #888; font-size: 14px; padding: 20px 0; }
+    /* List view */
+    .list-row { display: flex; gap: 10px; align-items: center; padding: 10px 6px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px; }
+    .list-row:hover { background: #f6f9fc; }
+    .lr-when { width: 132px; color: #333; font-weight: 600; flex-shrink: 0; }
+    .lr-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lr-to { color: #777; width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+    .lr-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+    .lr-badge.queued { background: #e7f0fa; color: #28527a; }
+    .lr-badge.posted { background: #e8f5e9; color: #2e7d32; }
+    .list-sep { font-size: 12px; font-weight: 700; color: #999; padding: 14px 6px 4px; }
+    @media (max-width: 560px) { .lr-to { display: none; } .lr-when { width: 118px; } }
     /* Settings + PIN overlays */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35);
       display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 10; }
@@ -336,7 +347,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-07-09.6</div>
+    <div class="ver">build 2026-07-09.7</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -346,7 +357,8 @@
       <button class="cal-btn" onclick="calPrev()" title="Previous month">‹</button>
       <button class="cal-btn" onclick="calToday()">Today</button>
       <button class="cal-btn" onclick="calNext()" title="Next month">›</button>
-      <button class="cal-btn" onclick="loadSchedule().then(renderMonth)">↻ Refresh</button>
+      <button class="cal-btn" id="calViewToggle" onclick="toggleCalView()">☰ List</button>
+      <button class="cal-btn" onclick="loadSchedule().then(renderActive)">↻ Refresh</button>
       <button class="cal-btn" onclick="closeCalendar()">✕ Close</button>
     </div>
     <div class="cal-pick hidden" id="calPickBanner">📌 Tap an open day to schedule your new post on it. (The time stays as set on the form.)</div>
@@ -357,6 +369,7 @@
     </div>
     <div class="cal-status" id="calStatus"></div>
     <div class="cal-grid" id="calGrid"></div>
+    <div id="calList" class="hidden"></div>
   </div>
 
   <!-- Drafts view -->
@@ -1057,7 +1070,11 @@
       $("calendarView").classList.remove("hidden");
       if (calYear === null) { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); }
       await loadSchedule();
-      renderMonth();
+      const showList = calListMode && !calPickMode;   // date-picking needs the month grid
+      $("calGrid").classList.toggle("hidden", showList);
+      $("calList").classList.toggle("hidden", !showList);
+      $("calViewToggle").textContent = showList ? "▦ Month" : "☰ List";
+      if (showList) renderList(); else renderMonth();
     }
     function closeCalendar() { calPickMode = false; $("calPickBanner").classList.add("hidden"); $("calendarView").classList.add("hidden"); }
     function pickDate(d) {
@@ -1070,6 +1087,48 @@
     function calPrev() { if (--calMonth < 0) { calMonth = 11; calYear--; } renderMonth(); }
     function calNext() { if (++calMonth > 11) { calMonth = 0; calYear++; } renderMonth(); }
     function calToday() { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); renderMonth(); }
+
+    // ----- Month vs List view -----
+    let calListMode = false;
+    function renderActive() { if (calListMode) renderList(); else renderMonth(); }
+    function toggleCalView() {
+      calListMode = !calListMode;
+      $("calGrid").classList.toggle("hidden", calListMode);
+      $("calList").classList.toggle("hidden", !calListMode);
+      $("calViewToggle").textContent = calListMode ? "▦ Month" : "☰ List";
+      renderActive();
+    }
+    function fmtListDate(d) {
+      const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      let h = d.getHours(); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
+      return `${M[d.getMonth()]} ${d.getDate()}, ${h}:${("0" + d.getMinutes()).slice(-2)} ${ap}`;
+    }
+    function renderList() {
+      const box = $("calList"); box.innerHTML = "";
+      const queued = scheduleData.filter(p => p.status === "queued").sort((a, b) => a.date - b.date);
+      const posted = scheduleData.filter(p => p.status === "posted").sort((a, b) => b.date - a.date);
+      if (!queued.length && !posted.length) { box.innerHTML = `<div class="dempty">Nothing scheduled or posted yet.</div>`; return; }
+      const addRows = (label, rows) => {
+        if (!rows.length) return;
+        const sep = document.createElement("div"); sep.className = "list-sep"; sep.textContent = label; box.appendChild(sep);
+        rows.forEach(p => {
+          const idx = scheduleData.indexOf(p);
+          const photoName = p.folder.split("/")[1].replace(/^\d{4}-\d{2}-\d{2}-/, "");
+          const marks = (p.type === "story" ? "📱" : "") + (isVideoPath(p.imagePath) ? "🎬" : "");
+          const row = document.createElement("div");
+          row.className = "list-row";
+          row.onclick = () => openDetail(idx);
+          const when = document.createElement("span"); when.className = "lr-when"; when.textContent = fmtListDate(p.date);
+          const nm = document.createElement("span"); nm.className = "lr-name"; nm.textContent = (marks ? marks + " " : "") + photoName;
+          const to = document.createElement("span"); to.className = "lr-to"; to.textContent = (p.platforms || []).join(", ");
+          const badge = document.createElement("span"); badge.className = "lr-badge " + p.status; badge.textContent = p.status;
+          row.appendChild(when); row.appendChild(nm); row.appendChild(to); row.appendChild(badge);
+          box.appendChild(row);
+        });
+      };
+      addRows("Upcoming", queued);
+      addRows("Posted", posted);
+    }
 
     async function getBranch() {
       try { const r = await ghGet(""); if (r.ok) return (await r.json()).default_branch || "main"; } catch (e) {}
@@ -1350,11 +1409,17 @@
         if (!r.ok) throw new Error("Couldn't read the repo (" + r.status + ").");
         const tree = (await r.json()).tree || [];
         const files = tree.filter(t => t.type === "blob" && t.path.startsWith(p.folder + "/"));
-        if (!files.length) throw new Error("Nothing left to delete — hit Refresh.");
-        for (const f of files) await deleteFile(f.path, f.sha, `Delete ${name}`);
+        let failed = 0;
+        for (const f of files) {
+          const dr = await deleteFile(f.path, f.sha, `Delete ${name}`);
+          if (!dr.ok) failed++;
+        }
+        if (failed) throw new Error(`${failed} file(s) wouldn't delete — hit ↻ Refresh and try again.`);
+        // Drop it from the view right away — GitHub's file listing can lag a minute
+        // after a delete, so don't rely on an immediate reload to reflect it.
+        scheduleData = scheduleData.filter(x => x.folder !== p.folder);
         $("postDetail").classList.add("hidden");
-        await loadSchedule();
-        renderMonth();
+        renderActive();
         setCalStatus(`✓ Deleted "${name}".`);
       } catch (err) { setCalStatus("✗ " + err.message); }
     }
