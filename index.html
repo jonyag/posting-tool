@@ -270,6 +270,12 @@
     <label class="hidden" id="markFileWrap" style="font-weight:500;margin-top:8px;display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="markFile" checked> Mark original photo with ✓ + date when I use it
     </label>
+    <div class="hidden" id="photoFolderWrap">
+      <div class="hint" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <span id="photoFolderState"></span>
+        <button type="button" class="cal-btn" id="photoFolderBtn" onclick="choosePhotoDir()">📁 Choose photo folder</button>
+      </div>
+    </div>
 
     <div class="caption-head">
       <label for="caption" style="margin-bottom:0">Caption</label>
@@ -351,7 +357,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-09-11.1</div>
+    <div class="ver">build 2026-09-12.1</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -702,6 +708,56 @@
     }
     function isVideoPath(p) { return /\.(mp4|mov)$/i.test(p || ""); }
 
+    // ---------- photo folder (needed for ✓-marking) ----------
+    // Since mid-2026 Chromium (Chrome/Edge) only lets a site rename a local file if the site
+    // holds WRITE permission on the file's FOLDER — permission on the file alone is refused
+    // with NotAllowedError. So the user picks their photo folder once; the handle is kept in
+    // IndexedDB (localStorage can't hold handles) and re-authorised on each photo pick.
+    let photoDirHandle = null;
+    function idb() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open("posting-tool", 1);
+        r.onupgradeneeded = () => r.result.createObjectStore("kv");
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+    }
+    async function idbGet(k) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction("kv").objectStore("kv").get(k); t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error); }); }
+    async function idbSet(k, v) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction("kv", "readwrite").objectStore("kv").put(v, k); t.onsuccess = () => res(); t.onerror = () => rej(t.error); }); }
+    async function loadPhotoDir() {
+      try { photoDirHandle = (await idbGet("photo_dir")) || null; } catch (e) { photoDirHandle = null; }
+      refreshPhotoDirUI();
+    }
+    function refreshPhotoDirUI() {
+      const el = $("photoFolderState"), btn = $("photoFolderBtn");
+      if (!el) return;
+      el.textContent = photoDirHandle
+        ? `📁 Photo folder for ✓-marking: ${photoDirHandle.name}`
+        : "⚠ To mark originals with ✓, choose your photo folder once:";
+      btn.textContent = photoDirHandle ? "Change folder" : "📁 Choose photo folder";
+    }
+    async function choosePhotoDir() {
+      try {
+        const h = await window.showDirectoryPicker({ mode: "readwrite", id: "photo-folder" });
+        photoDirHandle = h;
+        await idbSet("photo_dir", h);
+        refreshPhotoDirUI();
+        showMsg(`📁 Photo folder set to "${h.name}". Photos chosen from inside it (or its subfolders) will get the ✓ mark.`, "ok");
+      } catch (e) { if (e.name !== "AbortError") showMsg("Couldn't set the photo folder: " + e.message, "err"); }
+    }
+    // Returns "" when the folder grant covers this file, otherwise the reason it won't rename.
+    // Call it right after a click (the permission prompt needs user activation).
+    async function ensureFolderGrant(fileHandle) {
+      if (!photoDirHandle) return "no photo folder has been chosen yet";
+      let perm = await photoDirHandle.queryPermission({ mode: "readwrite" });
+      if (perm !== "granted") perm = await photoDirHandle.requestPermission({ mode: "readwrite" });
+      if (perm !== "granted") return `the browser did not allow editing the "${photoDirHandle.name}" folder (permission: ${perm})`;
+      const rel = await photoDirHandle.resolve(fileHandle);
+      if (!rel) return `this photo is not inside the "${photoDirHandle.name}" folder`;
+      return "";
+    }
+    const FOLDER_FIX = " Use “📁 Choose photo folder” under the photo to fix this.";
+
     async function pickPhotoFS() {
       try {
         const imageTypes = {
@@ -720,10 +776,14 @@
         // would silently refuse — which is why marking a draft's original was failing.)
         let permNote = "";
         try {
+          // Folder grant first (this is what Chromium now requires for a rename), then the
+          // file's own grant (normally auto-granted once the folder is).
+          const why = await ensureFolderGrant(handle);
+          if (why) permNote = `\n⚠ This photo won't get the ✓ mark: ${why}.` + FOLDER_FIX;
           if (handle.requestPermission) {
             let perm = await handle.queryPermission({ mode: "readwrite" });
             if (perm !== "granted") perm = await handle.requestPermission({ mode: "readwrite" });
-            if (perm !== "granted") permNote = `\n⚠ The browser did NOT allow editing this file (permission: ${perm}), so it won't get the ✓ mark. Click the lock/page icon in the address bar → Permissions → File editing → Allow, then choose the photo again.`;
+            if (perm !== "granted" && !permNote) permNote = `\n⚠ The browser did NOT allow editing this file (permission: ${perm}), so it won't get the ✓ mark. Click the lock/page icon in the address bar → Permissions → File editing → Allow, then choose the photo again.`;
           }
           if (!handle.move) permNote = "\n⚠ This browser can't rename files, so the original won't get the ✓ mark.";
         } catch (e) { permNote = "\n⚠ Couldn't ask for file-edit permission (" + (e.name || e) + "), so the original won't get the ✓ mark."; }
@@ -751,6 +811,8 @@
       if (cb && !cb.checked) return "\n(Original not marked — the “Mark original photo” box is unticked.)";
       if (photoMarked) return "";
       try {
+        const why = await ensureFolderGrant(pickedFileHandle);
+        if (why) return `\n⚠ Original NOT marked: ${why}.` + FOLDER_FIX;
         let perm = await pickedFileHandle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") perm = await pickedFileHandle.requestPermission({ mode: "readwrite" });
         if (perm !== "granted") return `\n⚠ Original NOT marked: the browser did not allow editing the file (permission: ${perm}). Click the lock/page icon in the address bar → Permissions → File editing → Allow.`;
@@ -767,7 +829,10 @@
         // upload (e.g. Add to Queue after using the LinkedIn/Threads button) still reads.
         try { pickedFile = await pickedFileHandle.getFile(); } catch (e) {}
         return `\nOriginal marked: ${stem2}${mark}${ext2}`;
-      } catch (e) { return `\n⚠ Original NOT marked: the rename failed (${e.name || "error"}: ${e.message || e}). If the photo lives in OneDrive, make sure it is “Always keep on this device”.`; }
+      } catch (e) {
+        if (e.name === "NotAllowedError") return `\n⚠ Original NOT marked: the browser refused the rename (it needs edit permission on the photo's folder).` + FOLDER_FIX;
+        return `\n⚠ Original NOT marked: the rename failed (${e.name || "error"}: ${e.message || e}).`;
+      }
     }
 
     async function putFile(owner, repo, token, path, contentB64, message) {
@@ -1981,7 +2046,7 @@
     (function () {
       // Date + time start blank on purpose (drafts are undated); picking a date auto-fills noon.
       $("date").addEventListener("change", onDateChange);
-      if (FS_SUPPORTED) { $("photo").classList.add("hidden"); $("photoPickBtn").classList.remove("hidden"); $("markFileWrap").classList.remove("hidden"); }
+      if (FS_SUPPORTED) { $("photo").classList.add("hidden"); $("photoPickBtn").classList.remove("hidden"); $("markFileWrap").classList.remove("hidden"); $("photoFolderWrap").classList.remove("hidden"); loadPhotoDir(); }
       ["caption", "tags"].forEach(id => $(id).addEventListener("input", updateBskyWarn));
       document.querySelectorAll(".platforms input").forEach(cb => cb.addEventListener("change", updateBskyWarn));
       if (LS.getItem("skip_lock")) unlock();   // this device opted out of the lock screen
