@@ -306,6 +306,13 @@
       </div>
     </div>
     <div class="hint hidden" id="bskyWarn" style="margin-top:8px"></div>
+    <div class="hint hidden" id="igWarn" style="margin-top:8px;color:#c0392b">
+      <span id="igWarnText"></span>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <button type="button" class="cal-btn" onclick="padForInstagram()">🖼 Pad for Instagram</button>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0">background <input type="color" id="igPadColor" value="#ffffff" style="width:36px;height:26px;padding:0;border:1px solid var(--line)"></label>
+      </div>
+    </div>
 
     <div class="row">
       <div><label for="date">Date</label><input type="date" id="date"></div>
@@ -357,7 +364,7 @@
     </div>
     <div class="hint" style="text-align:right;margin-top:6px">No date needed for a draft — finish &amp; schedule it later from 📝 Drafts.</div>
     <div class="msg" id="msg"></div>
-    <div class="ver">build 2026-09-12.1</div>
+    <div class="ver">build 2026-09-18.1</div>
   </form>
 
   <!-- Calendar / schedule view -->
@@ -670,8 +677,10 @@
       $("suggestion").classList.remove("show");
       $("hashSug").classList.remove("show");
       warnIfLarge($("photo").files[0]);
+      measurePhoto($("photo").files[0]);
     }
     function getSelectedFile() {
+      if (paddedFile) return paddedFile;    // padded-for-Instagram copy wins
       if (reusedFile) return reusedFile;    // photo pulled back from GitHub (reuse / draft)
       return FS_SUPPORTED ? pickedFile : $("photo").files[0];
     }
@@ -707,6 +716,74 @@
       return !!f && ((f.type && f.type.startsWith("video")) || /\.(mp4|mov)$/i.test(f.name || ""));
     }
     function isVideoPath(p) { return /\.(mp4|mov)$/i.test(p || ""); }
+
+    // ---------- Instagram shape check ----------
+    // Instagram feed posts must be between 4:5 (tall) and 1.91:1 (wide). Anything else is
+    // REFUSED by Meta with a permanent "aspect ratio not supported" error — a 2.41:1 pano
+    // sat in the queue for a day being retried (Sept 2026). So: measure every photo, warn
+    // while it can still be fixed, offer to pad it, and refuse to queue a shape IG will reject.
+    const IG_MIN = 0.8, IG_MAX = 1.91;
+    let photoDims = null;      // {w,h} of the current photo (null = unknown or video)
+    let paddedFile = null;     // padded copy that replaces the chosen photo for upload
+    function measurePhoto(file) {
+      photoDims = null; paddedFile = null;
+      if (!file || isVideoFile(file)) { updateIgWarn(); return; }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { photoDims = { w: img.naturalWidth, h: img.naturalHeight }; URL.revokeObjectURL(url); updateIgWarn(); };
+      img.onerror = () => { URL.revokeObjectURL(url); updateIgWarn(); };
+      img.src = url;
+    }
+    function ratioLabel(r) { return r >= 1 ? r.toFixed(2) + ":1" : "1:" + (1 / r).toFixed(2); }
+    function igShapeProblem() {   // "" when fine or unknown; otherwise a plain-language reason
+      if (!photoDims) return "";
+      const r = photoDims.w / photoDims.h;
+      if (r >= IG_MIN - 0.005 && r <= IG_MAX + 0.005) return "";
+      return `this photo is ${photoDims.w}×${photoDims.h} (${ratioLabel(r)}) and Instagram only accepts shapes between 4:5 tall and 1.91:1 wide`;
+    }
+    function updateIgWarn() {
+      const el = $("igWarn"); if (!el) return;
+      const ig = document.querySelector('.platforms input[value="instagram"]');
+      const problem = igShapeProblem();
+      if (!ig || !ig.checked || $("storyMode").checked || !problem) { el.classList.add("hidden"); return; }
+      $("igWarnText").textContent = `⚠️ Instagram will refuse this post: ${problem}. Pad it onto a background (uses the padded copy for every site in this post), or untick Instagram.`;
+      el.classList.remove("hidden");
+    }
+    function blockIfIgShape(chosen) {   // save-time hard stop: IG would reject it, so don't queue it
+      if (!chosen.includes("instagram") || $("storyMode").checked) return false;
+      const problem = igShapeProblem();
+      if (!problem) return false;
+      showMsg(`✗ Not saved — Instagram will refuse it: ${problem}. Use “🖼 Pad for Instagram” (under the sites), or untick Instagram.`, "err");
+      return true;
+    }
+    // Centre the photo on a solid background at the nearest Instagram-legal shape
+    // (1.91:1 for wide photos, 4:5 for tall ones) and swap it in for the upload.
+    async function padForInstagram() {
+      const file = getSelectedFile();
+      if (!file || !photoDims) { showMsg("Choose a photo first.", "err"); return; }
+      const r = photoDims.w / photoDims.h;
+      const W = r > IG_MAX ? photoDims.w : Math.round(photoDims.h * IG_MIN);
+      const H = r > IG_MAX ? Math.round(photoDims.w / IG_MAX) : photoDims.h;
+      const color = $("igPadColor").value || "#ffffff";
+      showMsg("Padding…", "ok");
+      try {
+        const url = URL.createObjectURL(file);
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("Couldn't read that image.")); i.src = url; });
+        const c = document.createElement("canvas"); c.width = W; c.height = H;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = color; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, Math.round((W - photoDims.w) / 2), Math.round((H - photoDims.h) / 2));
+        URL.revokeObjectURL(url);
+        const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.92));
+        if (!blob) throw new Error("The browser couldn't build the padded image (it may be too large).");
+        const stem = (file.name || "photo").replace(/\.[^.]+$/, "");
+        paddedFile = new File([blob], `${stem}-ig.jpg`, { type: "image/jpeg" });
+        photoDims = { w: W, h: H };
+        $("photoName").textContent += ` → padded to ${W}×${H} (${ratioLabel(W / H)}) on ${color}`;
+        updateIgWarn();
+        showMsg(`🖼 Padded copy ready (${W}×${H}). The original file is untouched; the padded copy is what gets posted.`, "ok");
+      } catch (e) { showMsg("✗ Couldn't pad the photo: " + e.message, "err"); }
+    }
 
     // ---------- photo folder (needed for ✓-marking) ----------
     // Since mid-2026 Chromium (Chrome/Edge) only lets a site rename a local file if the site
@@ -794,6 +871,7 @@
         $("photoName").classList.remove("hidden");
         if (permNote) showMsg(permNote.trim(), "err");
         warnIfLarge(pickedFile);
+        measurePhoto(pickedFile);
         $("suggestion").classList.remove("show");
         $("hashSug").classList.remove("show");
       } catch (e) { /* user cancelled the picker */ }
@@ -873,6 +951,7 @@
       const caption = $("caption").value.trim();
       const tags = $("tags").value.trim().split(/\s+/).filter(Boolean)
         .map(t => "#" + t.replace(/^#+/, ""));
+      if (blockIfIgShape(chosen)) return;
       if (!confirmBlueskyLength(chosen, caption, tags)) return;
       const stem = file.name.replace(/\.[^.]+$/, "");
       let ext = (file.name.match(/\.([^.]+)$/) || [, "jpg"])[1].toLowerCase();
@@ -1615,6 +1694,7 @@
       const sched = `${date} ${time}`;
       const caption = $("caption").value.trim();
       const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
+      if (blockIfIgShape(chosen)) return;
       if (!confirmBlueskyLength(chosen, caption, tags)) return;
       const yaml = buildPostYaml(caption, tags, chosen, sched);
       $("submitBtn").disabled = true;
@@ -1666,6 +1746,7 @@
     // Reset the compose form after a save (shared by Add to Queue + Save as draft).
     function clearForm() {
       pickedFile = null; pickedFileHandle = null; photoMarked = false; reusedFile = null;
+      measurePhoto(null);
       $("photoName").classList.add("hidden"); $("photoName").textContent = "";
       if (!FS_SUPPORTED) $("photo").value = "";
       $("caption").value = ""; $("tags").value = "";
@@ -1697,6 +1778,7 @@
       return blueskyText(caption, tags).length;
     }
     function updateBskyWarn() {
+      updateIgWarn();   // same triggers (site ticks, story mode, photo change) apply to the Instagram shape warning
       const el = $("bskyWarn");
       if (!el) return;
       const bsky = document.querySelector('.platforms input[value="bluesky"]');
@@ -1768,6 +1850,7 @@
         resetEditMode();                       // fresh new post, not an edit
         if (isVideoPath(p.imagePath)) { $("storyMode").checked = true; toggleStoryMode(); }  // video only works as a story
         reusedFile = f;
+        measurePhoto(f);
         setReusedPhotoLabel((p.folder.split("/")[1]) + " — reused");
         $("caption").value = p.caption || "";  // bring caption + hashtags as a starting point
         $("tags").value = (p.hashtags || []).join(" ");
@@ -1872,6 +1955,7 @@
       const sched = `${date} ${time}`;
       const caption = $("caption").value.trim();
       const tags = $("tags").value.trim().split(/\s+/).filter(Boolean).map(t => "#" + t.replace(/^#+/, ""));
+      if (blockIfIgShape(chosen)) return;
       if (!confirmBlueskyLength(chosen, caption, tags)) return;
       const yaml = buildPostYaml(caption, tags, chosen, sched);
 
@@ -2017,7 +2101,7 @@
       reusedFile = null;
       if (d.imagePath) {
         setReusedPhotoLabel(name + " — draft photo");
-        fetchStoredPhoto(d.imagePath).then(f => { reusedFile = f; }).catch(() => {});
+        fetchStoredPhoto(d.imagePath).then(f => { reusedFile = f; measurePhoto(f); }).catch(() => {});
       }
       $("editBannerText").textContent = `Finishing draft "${name}" — the photo stays the same. Add a date + platforms, then Add to Queue to schedule it (or Save as draft to keep editing later).`;
       $("editBanner").classList.remove("hidden");
